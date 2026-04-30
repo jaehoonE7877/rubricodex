@@ -10,14 +10,15 @@ changelog:
         - semver-major
     - title: Features
       labels:
-        - enhancement
+        - "type: feature"
         - feature
     - title: Bug fixes
       labels:
-        - bug
+        - "type: bug"
     - title: Documentation / repo meta
       labels:
-        - documentation
+        - "type: docs"
+        - "area: repo-meta"
         - repo-meta
     - title: Other changes
       labels:

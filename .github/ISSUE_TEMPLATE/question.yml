@@ -1,7 +1,7 @@
 name: ❓ 질문 / 사용 문의
 description: 사용 방법이나 동작 이해에 대한 질문.
 title: "[Question] "
-labels: ["question"]
+labels: ["type: question", "status: needs triage"]
 body:
   - type: markdown
     attributes:
