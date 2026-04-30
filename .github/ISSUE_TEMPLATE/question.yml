@@ -1,0 +1,23 @@
+name: ❓ 질문 / 사용 문의
+description: 사용 방법이나 동작 이해에 대한 질문.
+title: "[Question] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        가능하면 [README](https://github.com/jaehoonE7877/rubricodex/blob/main/README.md)와 [Rubricodex SSoT](https://github.com/jaehoonE7877/rubricodex/blob/main/docs/rubricodex-ssot.md)를 먼저 확인해주세요.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 질문 내용
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: 시도한 것 (선택)
+      description: 어떤 명령/문서/설정을 시도해봤는지.
+      render: bash

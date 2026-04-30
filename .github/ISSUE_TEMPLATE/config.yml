@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 프로젝트 입구 (README)
+    url: https://github.com/jaehoonE7877/rubricodex/blob/main/README.md
+    about: Rubricodex를 처음 본다면 먼저 읽어주세요. SSoT 링크와 제품 한 줄 설명이 있습니다.
+  - name: 🧭 제품 기준 문서 (SSoT)
+    url: https://github.com/jaehoonE7877/rubricodex/blob/main/docs/rubricodex-ssot.md
+    about: 제품 스펙, artifact 계약, CLI surface, roadmap의 단일 기준입니다.
+  - name: 🚀 최신 릴리스
+    url: https://github.com/jaehoonE7877/rubricodex/releases/latest
+    about: 사용 중인 Rubricodex 버전이 최신인지 확인해주세요. 이미 고쳐진 문제일 수 있습니다.
+  - name: 🔒 보안 취약점 신고
+    url: https://github.com/jaehoonE7877/rubricodex/security/advisories/new
+    about: 보안 이슈는 공개 issue가 아니라 비공개 advisory로 제출해주세요. SECURITY.md 정책 참조.
