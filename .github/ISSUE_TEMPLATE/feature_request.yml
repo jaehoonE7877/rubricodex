@@ -1,7 +1,7 @@
 name: ✨ 기능 제안
 description: 새로운 기능, 개선, 또는 변경 제안.
 title: "[Feature] "
-labels: ["type: feature", "status: needs triage"]
+labels: ["✨ feature", "🚦 needs triage"]
 body:
   - type: markdown
     attributes:
