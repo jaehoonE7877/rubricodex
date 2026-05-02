@@ -22,15 +22,15 @@
 
 ```bash
 # 예: 문서-only 변경이면 아래 검증 결과를 적어주세요.
-rg -n "Rubricodex|rubricodex|\\.rubricodex/" README.md docs .github
+rg -n "Rubricodex|rubricodex|\\.rubricodex/" README.md examples .github
 ```
 
 <!-- 위 외에 수동으로 확인한 시나리오가 있다면 적어주세요. -->
 
 ## 체크
 
-- [ ] README가 `docs/rubricodex-ssot.md`를 가리킨다.
-- [ ] SSoT의 이미지 링크가 `assets/rubricodex-harness-map.png`와 맞는다.
+- [ ] README가 Notion Canonical SSoT를 가리킨다.
+- [ ] 로컬에 경쟁 SSoT 문서가 없다.
 - [ ] schema · CLI command · artifact shape · taskpack wording을 바꿨다면 SSoT를 먼저 갱신했다.
 - [ ] Legacy 제품명은 migration 설명에만 남아 있다.
 - [ ] `.rubricodex/`, `rubricodex`, `Rubricodex` 용어가 일관적이다.
