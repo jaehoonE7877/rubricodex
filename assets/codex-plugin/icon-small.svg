@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" role="img" aria-label="Rubricodex">
+  <defs>
+    <linearGradient id="rubricodex-bg" x1="0" y1="0" x2="16" y2="16" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A8C8FF"/>
+      <stop offset="0.22" stop-color="#BCE3FF"/>
+      <stop offset="0.48" stop-color="#D9CFFB"/>
+      <stop offset="0.72" stop-color="#F5B8C6"/>
+      <stop offset="1" stop-color="#F8E9D8"/>
+    </linearGradient>
+    <radialGradient id="rubricodex-core" cx="42%" cy="36%" r="76%">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.98"/>
+      <stop offset="0.4" stop-color="#FFF1DA" stop-opacity="0.96"/>
+      <stop offset="0.8" stop-color="#F8D5C0" stop-opacity="0.88"/>
+      <stop offset="1" stop-color="#E5A8C0" stop-opacity="0.76"/>
+    </radialGradient>
+    <radialGradient id="rubricodex-halo" cx="50%" cy="50%" r="55%">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.26"/>
+      <stop offset="0.62" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="16" height="16" rx="3.6" fill="url(#rubricodex-bg)"/>
+  <circle cx="8" cy="8" r="4.65" fill="url(#rubricodex-halo)"/>
+  <circle cx="8" cy="8" r="3.6" fill="#FFFFFF" fill-opacity="0.16"/>
+  <circle cx="8" cy="8" r="3.6" fill="none" stroke="#FFFFFF" stroke-opacity="0.82" stroke-width="0.34"/>
+  <path d="M10.75 8.78A2.78 2.78 0 1 0 8.43 10.78" fill="none" stroke="#FFFFFF" stroke-opacity="0.82" stroke-width="0.36" stroke-linecap="round"/>
+  <path d="M10.8 8.94A2.78 2.78 0 1 0 8.56 10.92" fill="none" stroke="#7E9DD6" stroke-opacity="0.38" stroke-width="0.18" stroke-linecap="round"/>
+  <path d="M6.82 9.9A2.1 2.1 0 1 0 6.2 7.25" fill="none" stroke="#FFF1DA" stroke-opacity="0.86" stroke-width="0.34" stroke-linecap="round"/>
+  <circle cx="8" cy="8" r="1.18" fill="url(#rubricodex-core)" stroke="#FFFFFF" stroke-opacity="0.9" stroke-width="0.18"/>
+  <ellipse cx="7.62" cy="7.64" rx="0.38" ry="0.23" fill="#FFFFFF" fill-opacity="0.72" transform="rotate(-32 7.62 7.64)"/>
+</svg>
