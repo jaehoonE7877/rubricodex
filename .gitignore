@@ -1,1 +1,19 @@
 .DS_Store
+
+# Local scratch
+tmp/
+node_modules/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs / raw command output
+*.log
+
+# Rubricodex generated runtime artifacts not committed by default
+.rubricodex/app/sessions/*/cards.json
+.rubricodex/runs/*/evidence/
+.rubricodex/runs/*/logs/
+.rubricodex/runs/*/tmp/
