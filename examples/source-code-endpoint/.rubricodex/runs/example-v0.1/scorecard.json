@@ -1,0 +1,42 @@
+{
+  "schema_version": "0.2.0",
+  "run_id": "example-v0.1",
+  "decision": "pass",
+  "total_score": 1.0,
+  "threshold": 0.85,
+  "hard_gate_failures": [],
+  "missing_evidence": [],
+  "criterion_results": [
+    {
+      "criterion_id": "endpoint_contract",
+      "status": "pass",
+      "score": 1.0,
+      "evidence": "npm test"
+    },
+    {
+      "criterion_id": "input_validation",
+      "status": "pass",
+      "score": 1.0,
+      "evidence": "npm test"
+    },
+    {
+      "criterion_id": "data_integrity",
+      "status": "pass",
+      "score": 1.0,
+      "evidence": "npm test"
+    },
+    {
+      "criterion_id": "test_coverage",
+      "status": "pass",
+      "score": 1.0,
+      "evidence": "npm test"
+    },
+    {
+      "criterion_id": "maintainability",
+      "status": "pass",
+      "score": 1.0,
+      "evidence": "Manual review"
+    }
+  ],
+  "retune_hints": []
+}

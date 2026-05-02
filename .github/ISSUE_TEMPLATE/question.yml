@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        가능하면 [README](https://github.com/jaehoonE7877/rubricodex/blob/main/README.md)와 [Rubricodex SSoT](https://github.com/jaehoonE7877/rubricodex/blob/main/docs/rubricodex-ssot.md)를 먼저 확인해주세요.
+        가능하면 [README](https://github.com/jaehoonE7877/rubricodex/blob/main/README.md)와 [Rubricodex Canonical SSoT](https://app.notion.com/p/3544408817af8182b23ecf3ba169d82e)를 먼저 확인해주세요.
 
   - type: textarea
     id: question

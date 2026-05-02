@@ -45,6 +45,10 @@ flowchart LR
 
 Rubricodex는 필요한 경우에만 짧게 묻고, 바로 실행 가능한 target/matrix/taskpack으로 압축합니다.
 
+## v0.1 Fixture
+
+첫 v0.1 proof fixture는 [examples/source-code-endpoint](examples/source-code-endpoint)에 있습니다. 실제 app plugin이나 CLI 자동화 없이도 `@Rubricodex` mention에서 target, matrix, taskpack, scorecard까지 이어지는 수동 품질 루프를 검증합니다.
+
 ## Product SSoT
 
 제품 기준, roadmap, schema, CLI command, artifact 계약은 Notion에서 관리합니다.

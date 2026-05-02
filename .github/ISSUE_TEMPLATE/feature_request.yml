@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        먼저 [Rubricodex SSoT](https://github.com/jaehoonE7877/rubricodex/blob/main/docs/rubricodex-ssot.md)에 이미 계획된 항목인지 확인해주세요.
+        먼저 [Rubricodex Canonical SSoT](https://app.notion.com/p/3544408817af8182b23ecf3ba169d82e)에 이미 계획된 항목인지 확인해주세요.
 
   - type: textarea
     id: motivation

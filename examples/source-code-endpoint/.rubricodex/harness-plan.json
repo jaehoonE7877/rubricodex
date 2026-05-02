@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.2.0",
+  "run_id": "example-v0.1",
+  "mode": "standard",
+  "goal": "@Rubricodex 우리 서비스에 POST /api/widgets endpoint를 추가해줘. 너무 무겁게 말고 기본 테스트까지.",
+  "mode_reason": "Endpoint behavior and tests are needed, but this fixture has no auth, payment, migration, or data-integrity blast radius.",
+  "target_summary": "POST /api/widgets accepts valid widget input, creates a widget, and returns 201 with a stable response body.",
+  "questions": [],
+  "criteria_preview": [
+    "endpoint_contract",
+    "input_validation",
+    "data_integrity",
+    "test_coverage",
+    "maintainability"
+  ],
+  "evidence_required": [
+    "npm test"
+  ],
+  "next_action": "Run the implementation taskpack in .rubricodex/taskpacks/example-v0.1/implement.md."
+}
