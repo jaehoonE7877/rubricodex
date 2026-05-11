@@ -381,6 +381,20 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(readiness["assumptions"])
         self.assertNotIn("raw_transcript", str(readiness))
 
+    def test_request_readiness_does_not_treat_sentence_period_as_context(self) -> None:
+        readiness = assess_request_readiness("Add an API.", "standard")
+
+        checks = {check["id"]: check for check in readiness["checks"]}
+        self.assertFalse(checks["context"]["passed"])
+
+    def test_request_readiness_accepts_file_or_path_context(self) -> None:
+        for goal in ("Update README.md evidence.", "Fix src/server.js endpoint."):
+            with self.subTest(goal=goal):
+                readiness = assess_request_readiness(goal, "standard")
+                checks = {check["id"]: check for check in readiness["checks"]}
+
+                self.assertTrue(checks["context"]["passed"])
+
     def test_mode_classifier_uses_lowest_sufficient_mode(self) -> None:
         self.assertEqual(classify_mode("오타 문구 수정", "auto"), "micro")
         self.assertEqual(classify_mode("작은 버그 수정", "auto"), "quick")

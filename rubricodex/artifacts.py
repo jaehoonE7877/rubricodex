@@ -436,6 +436,19 @@ def classify_mode(goal: str, requested_mode: str = "auto") -> str:
     return DEFAULT_MODE
 
 
+def _has_reference_context(text: str, lowered: str) -> bool:
+    if _contains_any(lowered, {"file", "repo", "path", "directory", "기존", "파일", "레포", "경로"}):
+        return True
+    if re.search(r"(^|\s)(\.{1,2}/|~/|[A-Za-z0-9_.-]+/[A-Za-z0-9_.\-/]+)", text):
+        return True
+    return bool(
+        re.search(
+            r"(?<![\w/.-])(?:[A-Za-z0-9_-]+\.)*[A-Za-z0-9_-]+\.[A-Za-z][A-Za-z0-9]{0,9}(?![\w/-])",
+            text,
+        )
+    )
+
+
 def assess_request_readiness(goal: str, mode: str) -> dict[str, Any]:
     text = goal.strip()
     lowered = text.lower()
@@ -484,7 +497,7 @@ def assess_request_readiness(goal: str, mode: str) -> dict[str, Any]:
         {
             "id": "context",
             "label": "Reference context",
-            "passed": "/" in text or "." in text or _contains_any(lowered, {"file", "repo", "기존", "파일", "레포"}),
+            "passed": _has_reference_context(text, lowered),
         },
         {
             "id": "risk",
