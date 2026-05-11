@@ -724,9 +724,9 @@ def _is_non_empty(value: Any) -> bool:
 def _resolve_validation_mode(data: dict[str, Any], mode: str | None, issues: list[ValidationIssue]) -> str:
     valid = set(MODE_CRITERIA_RANGE)
     declared = data.get("mode")
-    if declared is not None and declared not in valid:
+    if declared is not None and (not isinstance(declared, str) or declared not in valid):
         issues.append(ValidationIssue("$.mode", f"mode must be one of {', '.join(MODE_CRITERIA_RANGE)}"))
-    if mode is not None and mode not in valid:
+    if mode is not None and (not isinstance(mode, str) or mode not in valid):
         issues.append(ValidationIssue("$.mode", f"mode must be one of {', '.join(MODE_CRITERIA_RANGE)}"))
     if isinstance(mode, str) and mode in valid:
         return mode

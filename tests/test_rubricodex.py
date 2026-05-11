@@ -320,6 +320,14 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertIn("$.mode", {issue.path for issue in issues})
 
+    def test_matrix_rejects_non_string_declared_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = ["standard"]
+
+        issues = validate_matrix(matrix, "standard")
+
+        self.assertIn("$.mode", {issue.path for issue in issues})
+
     def test_plan_draft_auto_classifies_and_writes_taskpack(self) -> None:
         result = draft_harness(
             self.root,
@@ -490,6 +498,19 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 1)
         self.assertIn("$.mode", stdout.getvalue())
+
+    def test_cli_matrix_validate_rejects_non_string_artifact_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = ["standard"]
+        matrix_file = self.root / "matrix.json"
+        write_json(matrix_file, matrix)
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(["matrix", "validate", "--mode", "standard", "--file", str(matrix_file)])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("$.mode", stdout.getvalue())
+        self.assertNotIn("Traceback", stdout.getvalue())
 
     def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
         self.write_default_contract()
