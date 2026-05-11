@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rubricodex"
+version = "0.1.0"
+description = "Codex output-quality harness for bounded goals, evidence, scorecards, and retune instructions."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Rubricodex" }]
+keywords = ["codex", "quality", "evaluation", "harness"]
+
+[project.scripts]
+rubricodex = "rubricodex.cli:main"
+
+[tool.setuptools]
+packages = ["rubricodex"]
