@@ -8,6 +8,9 @@ from io import StringIO
 from pathlib import Path
 
 from rubricodex.artifacts import (
+    APP_CARDS_TYPE,
+    APP_COLLECTION_TYPE,
+    APP_SESSION_TYPE,
     ArtifactError,
     GOAL_HEADINGS,
     BRIEF_TYPE,
@@ -16,16 +19,25 @@ from rubricodex.artifacts import (
     PROBE_PLAN_TYPE,
     PROBE_RESULT_TYPE,
     RUN_MANIFEST_TYPE,
+    ORCHESTRATOR_TYPE,
     SCHEMA_VERSION,
     SCORECARD_TYPE,
+    app_cards_path,
+    app_collection_path,
+    app_session_path,
+    collect_app_artifacts,
     compile_goal,
     compute_scorecard,
     goal_lock_path,
+    import_app_session,
     init_project,
     intent_path,
     lint_goal_file,
     lint_goal_text,
     matrix_path,
+    orchestrate_run,
+    orchestrate_status,
+    orchestrator_path,
     plan_probes,
     probe_plan_path,
     probe_prompt_path,
@@ -37,7 +49,11 @@ from rubricodex.artifacts import (
     run_manifest_path,
     validate_brief,
     validate_evidence,
+    validate_app_cards,
+    validate_app_collection,
+    validate_app_session,
     validate_matrix,
+    validate_orchestrator,
     validate_probe_plan,
     validate_probe_result,
     validate_run_manifest,
@@ -142,6 +158,62 @@ def sample_evidence(matrix: dict, statuses: dict[str, str] | None = None, scope_
         "executor": "codex-cli-goal",
         "raw_output_stored": False,
         "evidence_items": items,
+    }
+
+
+def sample_app_session() -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": APP_SESSION_TYPE,
+        "rubricodex_version": "0.1.0",
+        "created_at": "2026-05-11T00:00:00Z",
+        "session_id": "example-session",
+        "run_id": "example-v0.1",
+        "entrypoint": "@Rubricodex",
+        "mention": "@Rubricodex 우리 서비스에 POST /api/widgets endpoint를 추가해줘.",
+        "mode": "standard",
+        "user_goal_summary": "Add a small POST /api/widgets endpoint with basic tests.",
+        "selected_context_refs": ["examples/source-code-endpoint"],
+        "approved_decisions_ref": ".rubricodex/app/sessions/example-session/decisions.json",
+        "raw_transcript_stored": False,
+    }
+
+
+def sample_app_cards() -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": APP_CARDS_TYPE,
+        "rubricodex_version": "0.1.0",
+        "created_at": "2026-05-11T00:00:00Z",
+        "session_id": "example-session",
+        "run_id": "example-v0.1",
+        "raw_transcript_stored": False,
+        "cards": [
+            {
+                "card_type": "harness_plan",
+                "title": "Harness Plan",
+                "summary": "Bounded source-code endpoint task.",
+                "artifact_refs": [".rubricodex/intent/brief.json"],
+            },
+            {
+                "card_type": "matrix",
+                "title": "Matrix",
+                "summary": "Five criteria with two hard gates.",
+                "artifact_refs": [".rubricodex/matrix/evaluation-matrix.json"],
+            },
+            {
+                "card_type": "report",
+                "title": "Report",
+                "summary": "Current report is available for review.",
+                "artifact_refs": [".rubricodex/runs/example-v0.1/report.md"],
+            },
+            {
+                "card_type": "retune",
+                "title": "Retune",
+                "summary": "Retune card targets non-pass criteria only.",
+                "artifact_refs": [".rubricodex/runs/example-v0.1/retune_goal.md"],
+            },
+        ],
     }
 
 
@@ -500,6 +572,122 @@ class RubricodexContractTests(unittest.TestCase):
             "verification_commands": [],
         }
         self.assertTrue(validate_run_manifest(manifest))
+
+    def test_app_session_and_cards_validate_without_raw_transcript(self) -> None:
+        session = sample_app_session()
+        cards = sample_app_cards()
+        self.assertEqual(validate_app_session(session), [])
+        self.assertEqual(validate_app_cards(cards, session), [])
+
+        session["raw_transcript_stored"] = True
+        cards["raw_transcript"] = "do not store this"
+        self.assertTrue(validate_app_session(session))
+        self.assertTrue(validate_app_cards(cards))
+
+    def test_app_session_import_writes_shared_run_reference(self) -> None:
+        source = self.root / "incoming" / "app-session.json"
+        write_json(source, sample_app_session())
+
+        result = import_app_session(self.root, source)
+
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(app_session_path(self.root, "example-session").is_file())
+        imported = read_json(run_dir(self.root, "example-v0.1") / "app-session-import.json")
+        self.assertFalse(imported["raw_transcript_stored"])
+        self.assertIn("app-session.json", imported["app_session_path"])
+
+    def test_app_collect_links_cards_to_report_and_retune(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = collect_app_artifacts(self.root, "example-v0.1")
+
+        collection = read_json(app_collection_path(self.root, "example-v0.1"))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(collection["artifact_type"], APP_COLLECTION_TYPE)
+        self.assertEqual(collection["card_count"], 4)
+        self.assertEqual(validate_app_collection(collection), [])
+
+    def test_orchestrate_run_and_status_complete_shared_flow(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+
+        result = orchestrate_run(self.root, "example-v0.1", parallel=2)
+        status = orchestrate_status(self.root, "example-v0.1")
+
+        orchestrator = read_json(orchestrator_path(self.root, "example-v0.1"))
+        self.assertEqual(result["status"], "needs_retune")
+        self.assertEqual(status["status"], "complete")
+        self.assertEqual(orchestrator["artifact_type"], ORCHESTRATOR_TYPE)
+        self.assertEqual(validate_orchestrator(orchestrator), [])
+        self.assertTrue(app_collection_path(self.root, "example-v0.1").is_file())
+
+    def test_orchestrate_run_fails_when_app_collection_is_invalid(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        cards = sample_app_cards()
+        cards["cards"] = cards["cards"][:3]
+        write_json(app_cards_path(self.root, "example-session"), cards)
+
+        result = orchestrate_run(self.root, "example-v0.1", parallel=2)
+
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["steps"][-1], {"name": "app_collect", "status": "fail"})
+
+    def test_cli_app_and_orchestrate_commands(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        source = self.root / "incoming" / "app-session.json"
+        write_json(source, sample_app_session())
+
+        with redirect_stdout(StringIO()) as import_stdout:
+            import_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "app",
+                    "session",
+                    "import",
+                    "--from",
+                    str(source),
+                ]
+            )
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+        with redirect_stdout(StringIO()) as run_stdout:
+            run_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "orchestrate",
+                    "run",
+                    "--run-id",
+                    "example-v0.1",
+                    "--parallel",
+                    "2",
+                ]
+            )
+        with redirect_stdout(StringIO()) as status_stdout:
+            status_exit = cli_main(["--root", str(self.root), "orchestrate", "status", "--run", "example-v0.1"])
+
+        self.assertEqual(import_exit, 0)
+        self.assertEqual(run_exit, 0)
+        self.assertEqual(status_exit, 0)
+        self.assertIn("app-session-import.json", import_stdout.getvalue())
+        self.assertIn("orchestrator.json", run_stdout.getvalue())
+        self.assertIn("complete", status_stdout.getvalue())
 
     def test_probe_plan_selects_hard_gates_and_skips_supporting(self) -> None:
         self.write_default_contract()
