@@ -578,6 +578,15 @@ def validate_probe_result(data: dict[str, Any]) -> list[ValidationIssue]:
     return issues
 
 
+def _is_safe_path_segment(value: str) -> bool:
+    return (
+        value == value.strip()
+        and value not in {".", ".."}
+        and "/" not in value
+        and "\\" not in value
+    )
+
+
 def validate_app_session(data: dict[str, Any]) -> list[ValidationIssue]:
     issues = validate_forbidden_keys(data)
     if data.get("artifact_type") != APP_SESSION_TYPE:
@@ -585,6 +594,12 @@ def validate_app_session(data: dict[str, Any]) -> list[ValidationIssue]:
     for key in ("session_id", "run_id", "entrypoint", "mention", "mode", "user_goal_summary"):
         if not isinstance(data.get(key), str) or not data[key].strip():
             issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
+    if (
+        isinstance(data.get("session_id"), str)
+        and data["session_id"].strip()
+        and not _is_safe_path_segment(data["session_id"])
+    ):
+        issues.append(ValidationIssue("$.session_id", "session_id must be a single path-safe segment"))
     selected_context_refs = data.get("selected_context_refs")
     if not isinstance(selected_context_refs, list):
         issues.append(ValidationIssue("$.selected_context_refs", "selected_context_refs must be a list"))
@@ -606,6 +621,12 @@ def validate_app_cards(data: dict[str, Any], session: dict[str, Any] | None = No
     for key in ("session_id", "run_id"):
         if not isinstance(data.get(key), str) or not data[key].strip():
             issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
+    if (
+        isinstance(data.get("session_id"), str)
+        and data["session_id"].strip()
+        and not _is_safe_path_segment(data["session_id"])
+    ):
+        issues.append(ValidationIssue("$.session_id", "session_id must be a single path-safe segment"))
     if session:
         if data.get("session_id") != session.get("session_id"):
             issues.append(ValidationIssue("$.session_id", "cards session_id must match app-session.json"))
@@ -1722,6 +1743,20 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
         "retune_goal": f".rubricodex/runs/{run_id}/retune_goal.md",
         "orchestrator": f".rubricodex/runs/{run_id}/orchestrator.json",
     }
+    app_session_required = False
+    status_issues: list[ValidationIssue] = []
+    if (artifact_root(root_path) / "app" / "sessions").exists():
+        try:
+            _find_app_session_for_run(root_path, run_id)
+            app_session_required = True
+            required["app_collection"] = f".rubricodex/runs/{run_id}/app-collection.json"
+        except ArtifactError as error:
+            no_session = any(
+                issue.path == "$.run_id" and issue.message.startswith("no app session")
+                for issue in error.issues
+            )
+            if not no_session:
+                status_issues.extend(error.issues)
     missing = [name for name, path in required.items() if not _artifact_exists(root_path, path)]
     decision = None
     orchestration_status = None
@@ -1733,12 +1768,33 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
         orchestration = read_json(orchestrator_path(root_path, run_id))
         assert_valid(validate_orchestrator(orchestration))
         orchestration_status = orchestration.get("status")
+    if app_session_required and "app_collection" not in missing:
+        app_collection = read_json(app_collection_path(root_path, run_id))
+        status_issues.extend(validate_app_collection(app_collection))
+        if app_collection.get("report_path") != required["report"]:
+            status_issues.append(
+                ValidationIssue("$.app_collection.report_path", f"app collection must reference {required['report']}")
+            )
+        if app_collection.get("retune_goal_path") != required["retune_goal"]:
+            status_issues.append(
+                ValidationIssue(
+                    "$.app_collection.retune_goal_path",
+                    f"app collection must reference {required['retune_goal']}",
+                )
+            )
+    if orchestration_status == "fail" or status_issues:
+        status = "fail"
+    elif missing:
+        status = "incomplete"
+    else:
+        status = "complete"
     return {
-        "status": "fail" if orchestration_status == "fail" else "complete" if not missing else "incomplete",
+        "status": status,
         "run_id": run_id,
         "decision": decision,
         "orchestration_status": orchestration_status,
         "missing": missing,
+        "issues": [issue.as_dict() for issue in status_issues],
         "report_path": required["report"],
         "retune_goal_path": required["retune_goal"],
         "app_collection_path": str(app_collection_path(root_path, run_id)),

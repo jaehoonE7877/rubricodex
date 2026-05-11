@@ -584,6 +584,19 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(validate_app_session(session))
         self.assertTrue(validate_app_cards(cards))
 
+    def test_app_session_and_cards_reject_path_segment_session_id(self) -> None:
+        for unsafe in ("nested/session", "../session", "/tmp/session", "nested\\session"):
+            session = sample_app_session()
+            cards = sample_app_cards()
+            session["session_id"] = unsafe
+            cards["session_id"] = unsafe
+
+            session_issues = validate_app_session(session)
+            cards_issues = validate_app_cards(cards)
+
+            self.assertIn("$.session_id", {issue.path for issue in session_issues})
+            self.assertIn("$.session_id", {issue.path for issue in cards_issues})
+
     def test_app_session_import_writes_shared_run_reference(self) -> None:
         source = self.root / "incoming" / "app-session.json"
         write_json(source, sample_app_session())
@@ -642,7 +655,10 @@ class RubricodexContractTests(unittest.TestCase):
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
         lint_goal_file(self.root, "example-v0.1")
-        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        write_json(
+            run_dir(self.root, "example-v0.1") / "evidence.json",
+            sample_evidence(matrix, {"C-05": "partial"}),
+        )
         write_json(app_session_path(self.root, "example-session"), sample_app_session())
         write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
 
@@ -655,6 +671,46 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(orchestrator["artifact_type"], ORCHESTRATOR_TYPE)
         self.assertEqual(validate_orchestrator(orchestrator), [])
         self.assertTrue(app_collection_path(self.root, "example-v0.1").is_file())
+
+    def test_orchestrate_status_requires_current_app_collection_for_app_session(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+        orchestrate_run(self.root, "example-v0.1", parallel=2)
+
+        app_collection = app_collection_path(self.root, "example-v0.1")
+        app_collection.unlink()
+        missing_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(missing_status["status"], "incomplete")
+        self.assertIn("app_collection", missing_status["missing"])
+
+        collection = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": APP_COLLECTION_TYPE,
+            "rubricodex_version": "0.1.0",
+            "created_at": "2026-05-11T00:00:00Z",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "session_id": "example-session",
+            "app_session_path": ".rubricodex/app/sessions/example-session/app-session.json",
+            "cards_path": ".rubricodex/app/sessions/example-session/cards.json",
+            "report_path": ".rubricodex/runs/other/report.md",
+            "retune_goal_path": ".rubricodex/runs/example-v0.1/retune_goal.md",
+            "card_count": 4,
+            "raw_transcript_stored": False,
+        }
+        write_json(app_collection, collection)
+        stale_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(stale_status["status"], "fail")
+        self.assertIn(
+            "$.app_collection.report_path",
+            {issue["path"] for issue in stale_status["issues"]},
+        )
 
     def test_orchestrate_run_fails_when_app_collection_is_invalid(self) -> None:
         matrix = self.write_default_contract()
