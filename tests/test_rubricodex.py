@@ -360,6 +360,11 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("리뷰 반영해서 작은 버그 수정", "auto"), "quick")
         self.assertEqual(classify_mode("관리자 대시보드를 만들어줘", "auto"), "standard")
 
+    def test_mode_classifier_uses_word_boundaries_for_english_keywords(self) -> None:
+        self.assertEqual(classify_mode("Create copyright page", "auto"), "standard")
+        self.assertEqual(classify_mode("Add prefix handling", "auto"), "standard")
+        self.assertEqual(classify_mode("Preview page", "auto"), "standard")
+
     def test_audit_draft_includes_audit_specific_criterion(self) -> None:
         draft_harness(self.root, "audit-draft", "현재 diff review", mode="audit")
 

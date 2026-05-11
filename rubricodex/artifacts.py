@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -402,7 +403,14 @@ def init_project(
 
 def _contains_any(text: str, keywords: set[str]) -> bool:
     lowered = text.lower()
-    return any(keyword in lowered for keyword in keywords)
+    for keyword in keywords:
+        normalized = keyword.lower()
+        if normalized.isascii():
+            if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", lowered):
+                return True
+        elif normalized in lowered:
+            return True
+    return False
 
 
 def classify_mode(goal: str, requested_mode: str = "auto") -> str:
