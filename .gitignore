@@ -3,6 +3,8 @@
 # Local scratch
 tmp/
 node_modules/
+__pycache__/
+*.py[cod]
 
 # Local env / secrets
 .env

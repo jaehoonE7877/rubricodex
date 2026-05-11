@@ -9,11 +9,15 @@ from .artifacts import (
     DEFAULT_EXECUTOR,
     DEFAULT_MODE,
     ArtifactError,
+    collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    import_app_session,
     init_project,
     lint_goal_file,
     matrix_path,
+    orchestrate_run,
+    orchestrate_status,
     plan_probes,
     read_json,
     run_local,
@@ -21,6 +25,8 @@ from .artifacts import (
     run_dir,
     validate_brief,
     validate_evidence,
+    validate_app_cards,
+    validate_app_session,
     validate_matrix,
     validate_scorecard,
     verify_matrix_lock,
@@ -162,6 +168,52 @@ def cmd_probe_run(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "pass" else 1
 
 
+def cmd_app_session_import(args: argparse.Namespace) -> int:
+    result = import_app_session(args.root, args.source, mode=args.mode)
+    _print_json(result)
+    return 0
+
+
+def cmd_app_collect(args: argparse.Namespace) -> int:
+    result = collect_app_artifacts(args.root, args.run_id, mode=args.mode)
+    _print_json(result)
+    return 0
+
+
+def cmd_app_session_validate(args: argparse.Namespace) -> int:
+    data = read_json(args.file)
+    result = _validation_result("app_session", validate_app_session(data))
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
+
+
+def cmd_app_cards_validate(args: argparse.Namespace) -> int:
+    data = read_json(args.file)
+    result = _validation_result("app_cards", validate_app_cards(data))
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
+
+
+def cmd_orchestrate_run(args: argparse.Namespace) -> int:
+    result = orchestrate_run(
+        args.root,
+        args.run_id,
+        mode=args.mode,
+        backend=args.backend,
+        parallel=args.parallel,
+        execute=args.execute,
+        codex_bin=args.codex_bin,
+    )
+    _print_json(result)
+    return 0 if result["status"] in {"pass", "needs_retune"} else 1
+
+
+def cmd_orchestrate_status(args: argparse.Namespace) -> int:
+    result = orchestrate_status(args.root, args.run_id)
+    _print_json(result)
+    return 0 if result["status"] == "complete" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rubricodex")
     parser.add_argument("--root", default=".", help="Project root containing .rubricodex")
@@ -274,6 +326,44 @@ def build_parser() -> argparse.ArgumentParser:
     probe_run.add_argument("--execute", action="store_true")
     probe_run.add_argument("--codex-bin", default="codex")
     probe_run.set_defaults(func=cmd_probe_run)
+
+    app = subparsers.add_parser("app")
+    app_sub = app.add_subparsers(dest="app_command", required=True)
+    app_session = app_sub.add_parser("session")
+    app_session_sub = app_session.add_subparsers(dest="app_session_command", required=True)
+    app_session_import = app_session_sub.add_parser("import")
+    add_common(app_session_import)
+    app_session_import.add_argument("--from", dest="source", type=Path, required=True)
+    app_session_import.set_defaults(func=cmd_app_session_import)
+    app_session_validate = app_session_sub.add_parser("validate")
+    add_common(app_session_validate)
+    app_session_validate.add_argument("--file", type=Path, required=True)
+    app_session_validate.set_defaults(func=cmd_app_session_validate)
+    app_collect = app_sub.add_parser("collect")
+    add_common(app_collect)
+    app_collect.add_argument("--run-id", "--run", dest="run_id", required=True)
+    app_collect.set_defaults(func=cmd_app_collect)
+    app_cards = app_sub.add_parser("cards")
+    app_cards_sub = app_cards.add_subparsers(dest="app_cards_command", required=True)
+    app_cards_validate = app_cards_sub.add_parser("validate")
+    add_common(app_cards_validate)
+    app_cards_validate.add_argument("--file", type=Path, required=True)
+    app_cards_validate.set_defaults(func=cmd_app_cards_validate)
+
+    orchestrate = subparsers.add_parser("orchestrate")
+    orchestrate_sub = orchestrate.add_subparsers(dest="orchestrate_command", required=True)
+    orchestrate_run_parser = orchestrate_sub.add_parser("run")
+    add_common(orchestrate_run_parser)
+    orchestrate_run_parser.add_argument("--run-id", "--run", dest="run_id", required=True)
+    orchestrate_run_parser.add_argument("--backend", default="codex-cli-local")
+    orchestrate_run_parser.add_argument("--parallel", type=int, default=4)
+    orchestrate_run_parser.add_argument("--execute", action="store_true")
+    orchestrate_run_parser.add_argument("--codex-bin", default="codex")
+    orchestrate_run_parser.set_defaults(func=cmd_orchestrate_run)
+    orchestrate_status_parser = orchestrate_sub.add_parser("status")
+    add_common(orchestrate_status_parser)
+    orchestrate_status_parser.add_argument("--run-id", "--run", dest="run_id", required=True)
+    orchestrate_status_parser.set_defaults(func=cmd_orchestrate_status)
     return parser
 
 
