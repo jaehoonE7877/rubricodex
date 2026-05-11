@@ -6,7 +6,7 @@
     "partial": 1,
     "pass": 4
   },
-  "created_at": "2026-05-11T07:58:52Z",
+  "created_at": "2026-05-11T10:10:49Z",
   "decision": "pass_with_warnings",
   "mode": "standard",
   "results": [
@@ -16,8 +16,12 @@
         "examples/source-code-endpoint/src/server.js",
         "examples/source-code-endpoint/test/server.test.js"
       ],
+      "evidence_summaries": [
+        "The fixture exposes POST /api/widgets and tests the 201 response with widget fields."
+      ],
       "hard_gate": true,
       "name": "Endpoint contract",
+      "reason": "Summarized evidence satisfies the criterion. Evidence summary: The fixture exposes POST /api/widgets and tests the 201 response with widget fields.",
       "retune_hint": "Fix the POST /api/widgets response contract before changing supporting criteria.",
       "status": "pass"
     },
@@ -27,8 +31,12 @@
         "examples/source-code-endpoint/src/server.js",
         "examples/source-code-endpoint/test/server.test.js"
       ],
+      "evidence_summaries": [
+        "The validation branch rejects missing, empty, or non-string names and tests the 400 response."
+      ],
       "hard_gate": true,
       "name": "Input validation",
+      "reason": "Summarized evidence satisfies the criterion. Evidence summary: The validation branch rejects missing, empty, or non-string names and tests the 400 response.",
       "retune_hint": "Tighten validation while preserving the valid-input contract.",
       "status": "pass"
     },
@@ -38,8 +46,12 @@
         "examples/source-code-endpoint/src/server.js",
         "examples/source-code-endpoint/test/server.test.js"
       ],
+      "evidence_summaries": [
+        "The response includes id, name, and createdAt fields for created widgets."
+      ],
       "hard_gate": false,
       "name": "Data integrity",
+      "reason": "Summarized evidence satisfies the criterion. Evidence summary: The response includes id, name, and createdAt fields for created widgets.",
       "retune_hint": "Add summarized evidence for the response fields without expanding persistence scope.",
       "status": "pass"
     },
@@ -48,8 +60,12 @@
       "evidence_refs": [
         "examples/source-code-endpoint/test/server.test.js"
       ],
+      "evidence_summaries": [
+        "The fixture has focused node:test coverage for health, valid create, and invalid create behavior."
+      ],
       "hard_gate": false,
       "name": "Test coverage",
+      "reason": "Summarized evidence satisfies the criterion. Evidence summary: The fixture has focused node:test coverage for health, valid create, and invalid create behavior.",
       "retune_hint": "Add missing focused tests without adding dependencies.",
       "status": "pass"
     },
@@ -58,8 +74,12 @@
       "evidence_refs": [
         "examples/source-code-endpoint/src/server.js"
       ],
+      "evidence_summaries": [
+        "The implementation is small and dependency-free, but the maintainability evidence should be stated more explicitly in the report."
+      ],
       "hard_gate": false,
       "name": "Maintainability",
+      "reason": "Evidence is present but incomplete. Evidence summary: The implementation is small and dependency-free, but the maintainability evidence should be stated more explicitly in the report.",
       "retune_hint": "Clarify the maintainability evidence while keeping the implementation unchanged.",
       "status": "partial"
     }
