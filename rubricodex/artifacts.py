@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,6 +21,8 @@ EVIDENCE_TYPE = "rubricodex.evidence"
 SCORECARD_TYPE = "rubricodex.scorecard"
 GOAL_LOCK_TYPE = "rubricodex.goal_lock"
 MATRIX_LOCK_RESULT_TYPE = "rubricodex.matrix_lock_result"
+RUN_MANIFEST_TYPE = "rubricodex.run_manifest"
+LOCAL_RUNNER_EXECUTOR = "codex-cli-local"
 
 REQUIRED_BRIEF_BLOCKS = (
     "purpose",
@@ -116,6 +119,10 @@ def goal_lock_path(root: Path | str, run_id: str) -> Path:
 
 def run_dir(root: Path | str, run_id: str) -> Path:
     return artifact_root(root) / "runs" / run_id
+
+
+def run_manifest_path(root: Path | str, run_id: str) -> Path:
+    return run_dir(root, run_id) / "run-manifest.json"
 
 
 def read_json(path: Path | str) -> dict[str, Any]:
@@ -412,6 +419,42 @@ def validate_scorecard(data: dict[str, Any]) -> list[ValidationIssue]:
     return issues
 
 
+def validate_run_manifest(data: dict[str, Any]) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != RUN_MANIFEST_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {RUN_MANIFEST_TYPE}"))
+    if data.get("executor") != LOCAL_RUNNER_EXECUTOR:
+        issues.append(ValidationIssue("$.executor", f"executor must be {LOCAL_RUNNER_EXECUTOR}"))
+    if data.get("execution_mode") not in {"dry_run", "execute"}:
+        issues.append(ValidationIssue("$.execution_mode", "execution_mode must be dry_run or execute"))
+    if data.get("raw_output_stored") is not False:
+        issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
+    if not isinstance(data.get("result_summary"), str) or not data["result_summary"].strip():
+        issues.append(ValidationIssue("$.result_summary", "result_summary is required"))
+
+    for key in ("changed_files", "verification_commands", "command_results"):
+        if not isinstance(data.get(key), list):
+            issues.append(ValidationIssue(f"$.{key}", f"{key} must be a list"))
+
+    for index, result in enumerate(data.get("command_results", [])):
+        path = f"$.command_results[{index}]"
+        if not isinstance(result, dict):
+            issues.append(ValidationIssue(path, "command result must be an object"))
+            continue
+        for forbidden in ("stdout", "stderr", "raw_output", "output"):
+            if forbidden in result:
+                issues.append(ValidationIssue(f"{path}.{forbidden}", "raw command output fields are not allowed"))
+        if not isinstance(result.get("command"), str) or not result["command"].strip():
+            issues.append(ValidationIssue(f"{path}.command", "command is required"))
+        if "exit_code" not in result:
+            issues.append(ValidationIssue(f"{path}.exit_code", "exit_code is required"))
+        elif result["exit_code"] is not None and not isinstance(result["exit_code"], int):
+            issues.append(ValidationIssue(f"{path}.exit_code", "exit_code must be an integer or null"))
+        if not isinstance(result.get("summary"), str) or not result["summary"].strip():
+            issues.append(ValidationIssue(f"{path}.summary", "summary is required"))
+    return issues
+
+
 def assert_valid(issues: list[ValidationIssue]) -> None:
     errors = [issue for issue in issues if issue.severity == "error"]
     if errors:
@@ -701,6 +744,171 @@ def lint_goal_file(root: Path | str, run_id: str, mode: str = DEFAULT_MODE, goal
     result.update({"status": "pass" if not issues else "fail", "issues": [issue.as_dict() for issue in issues]})
     write_json(taskpack_dir(root, run_id) / "prompt-lint.json", result)
     return result
+
+
+def _relative_artifact_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def _assert_local_runner_ready(root: Path, run_id: str, mode: str) -> None:
+    goal_path = taskpack_dir(root, run_id) / "goal.md"
+    prompt_lint_path = taskpack_dir(root, run_id) / "prompt-lint.json"
+    issues: list[ValidationIssue] = []
+    if not goal_path.is_file():
+        issues.append(ValidationIssue("$.goal", f"goal.md is missing at {goal_path}"))
+    if not prompt_lint_path.is_file():
+        issues.append(ValidationIssue("$.prompt_lint", f"prompt-lint.json is missing at {prompt_lint_path}"))
+    if issues:
+        raise ArtifactError(issues)
+
+    prompt_lint = read_json(prompt_lint_path)
+    if prompt_lint.get("status") != "pass":
+        raise ArtifactError([ValidationIssue("$.prompt_lint.status", "prompt-lint.json must have status pass")])
+
+    lock_result = verify_matrix_lock(root, run_id, mode=mode)
+    if lock_result["status"] != "pass":
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    issue.get("path", "$.matrix_lock"),
+                    issue.get("message", "matrix lock failed"),
+                    issue.get("severity", "error"),
+                )
+                for issue in lock_result["issues"]
+            ]
+        )
+
+
+def _summarize_changed_files(root: Path) -> list[str]:
+    try:
+        completed = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    files: list[str] = []
+    for line in completed.stdout.splitlines():
+        if not line.strip():
+            continue
+        files.append(line[3:].strip())
+    return files
+
+
+def _missing_evidence(matrix: dict[str, Any], manifest_ref: str, mode: str, run_id: str) -> dict[str, Any]:
+    evidence = base_artifact(EVIDENCE_TYPE, mode=mode, run_id=run_id)
+    evidence.update(
+        {
+            "executor": LOCAL_RUNNER_EXECUTOR,
+            "raw_output_stored": False,
+            "runner_manifest_path": manifest_ref,
+            "runner_summary": "Local runner prepared the Codex CLI handoff; criterion evidence still needs implementation verification.",
+            "evidence_items": [
+                {
+                    "id": f"E-{criterion['id']}",
+                    "criterion_id": criterion["id"],
+                    "kind": "runner",
+                    "summary": "Local runner created the handoff manifest; explicit verification evidence is still missing.",
+                    "artifact_refs": [manifest_ref],
+                    "status": "missing_evidence",
+                    "confidence": 0.0,
+                }
+                for criterion in matrix.get("criteria", [])
+                if isinstance(criterion, dict) and criterion.get("id")
+            ],
+        }
+    )
+    return evidence
+
+
+def run_local(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    execute: bool = False,
+    codex_bin: str = "codex",
+    result_summary: str | None = None,
+    verification_commands: list[str] | None = None,
+    changed_files: list[str] | None = None,
+) -> dict[str, Any]:
+    root_path = Path(root)
+    _assert_local_runner_ready(root_path, run_id, mode)
+
+    matrix = read_json(matrix_path(root_path))
+    assert_valid(validate_matrix(matrix, mode))
+    manifest_path = run_manifest_path(root_path, run_id)
+    manifest_ref = _relative_artifact_path(manifest_path, root_path)
+    execution_mode = "execute" if execute else "dry_run"
+    command = f"{codex_bin} exec --cd <project-root> -"
+    command_result: dict[str, Any]
+
+    if execute:
+        goal_text = (taskpack_dir(root_path, run_id) / "goal.md").read_text(encoding="utf-8")
+        completed = subprocess.run(
+            [codex_bin, "exec", "--cd", str(root_path), "-"],
+            input=goal_text,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        command_result = {
+            "command": command,
+            "exit_code": completed.returncode,
+            "summary": f"Codex CLI exited with code {completed.returncode}; raw output discarded.",
+        }
+        default_summary = f"Codex CLI local execution exited with code {completed.returncode}."
+        changed_files = changed_files or _summarize_changed_files(root_path)
+    else:
+        command_result = {
+            "command": command,
+            "exit_code": None,
+            "summary": "Dry-run only; Codex CLI was not executed and goal.md remains the fallback handoff.",
+        }
+        default_summary = "Prepared Codex CLI local runner handoff without executing external commands."
+
+    manifest = base_artifact(RUN_MANIFEST_TYPE, mode=mode, run_id=run_id)
+    manifest.update(
+        {
+            "executor": LOCAL_RUNNER_EXECUTOR,
+            "execution_mode": execution_mode,
+            "goal_path": f".rubricodex/taskpacks/{run_id}/goal.md",
+            "prompt_lint_path": f".rubricodex/taskpacks/{run_id}/prompt-lint.json",
+            "matrix_lock_path": f".rubricodex/taskpacks/{run_id}/goal.lock.json",
+            "raw_output_stored": False,
+            "result_summary": result_summary or default_summary,
+            "command_results": [command_result],
+            "changed_files": changed_files or [],
+            "verification_commands": verification_commands or [],
+            "fallback_goal_exported": not execute,
+        }
+    )
+    assert_valid(validate_run_manifest(manifest))
+    write_json(manifest_path, manifest)
+
+    evidence_path = run_dir(root_path, run_id) / "evidence.json"
+    if evidence_path.exists():
+        evidence = read_json(evidence_path)
+        evidence["runner_manifest_path"] = manifest_ref
+        evidence["runner_summary"] = manifest["result_summary"]
+        evidence["raw_output_stored"] = False
+    else:
+        evidence = _missing_evidence(matrix, manifest_ref, mode, run_id)
+    assert_valid(validate_evidence(evidence, matrix))
+    write_json(evidence_path, evidence)
+
+    return {
+        "status": "pass",
+        "execution_mode": execution_mode,
+        "manifest_path": str(manifest_path),
+        "evidence_path": str(evidence_path),
+    }
 
 
 def compute_scorecard(

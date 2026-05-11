@@ -15,6 +15,7 @@ from .artifacts import (
     lint_goal_file,
     matrix_path,
     read_json,
+    run_local,
     run_dir,
     validate_brief,
     validate_evidence,
@@ -118,6 +119,21 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run_local(args: argparse.Namespace) -> int:
+    result = run_local(
+        args.root,
+        args.run_id,
+        mode=args.mode,
+        execute=args.execute,
+        codex_bin=args.codex_bin,
+        result_summary=args.summary,
+        verification_commands=args.verification_command,
+        changed_files=args.changed_file,
+    )
+    _print_json(result)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rubricodex")
     parser.add_argument("--root", default=".", help="Project root containing .rubricodex")
@@ -201,6 +217,18 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(report)
     report.add_argument("--run-id", required=True)
     report.set_defaults(func=cmd_report)
+
+    run = subparsers.add_parser("run")
+    run_sub = run.add_subparsers(dest="run_command", required=True)
+    run_local_parser = run_sub.add_parser("local")
+    add_common(run_local_parser)
+    run_local_parser.add_argument("--run-id", required=True)
+    run_local_parser.add_argument("--execute", action="store_true")
+    run_local_parser.add_argument("--codex-bin", default="codex")
+    run_local_parser.add_argument("--summary")
+    run_local_parser.add_argument("--verification-command", action="append", default=[])
+    run_local_parser.add_argument("--changed-file", action="append", default=[])
+    run_local_parser.set_defaults(func=cmd_run_local)
     return parser
 
 
