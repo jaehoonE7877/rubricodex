@@ -1663,6 +1663,21 @@ def collect_app_artifacts(root: Path | str, run_id: str, mode: str = DEFAULT_MOD
 
     report = run_dir(root_path, run_id) / "report.md"
     retune = run_dir(root_path, run_id) / "retune_goal.md"
+    report_ref = _relative_artifact_path(report, root_path)
+    retune_ref = _relative_artifact_path(retune, root_path)
+    card_refs = {
+        card["card_type"]: set(card.get("artifact_refs", []))
+        for card in cards["cards"]
+        if isinstance(card, dict) and isinstance(card.get("artifact_refs"), list)
+    }
+    link_issues: list[ValidationIssue] = []
+    if report_ref not in card_refs.get("report", set()):
+        link_issues.append(ValidationIssue("$.cards.report.artifact_refs", f"report card must reference {report_ref}"))
+    if retune_ref not in card_refs.get("retune", set()):
+        link_issues.append(ValidationIssue("$.cards.retune.artifact_refs", f"retune card must reference {retune_ref}"))
+    if link_issues:
+        raise ArtifactError(link_issues)
+
     missing = [str(path) for path in (report, retune) if not path.exists()]
     if missing:
         raise ArtifactError([ValidationIssue("$.app_collection", "missing shared artifacts: " + ", ".join(missing))])
@@ -1673,8 +1688,8 @@ def collect_app_artifacts(root: Path | str, run_id: str, mode: str = DEFAULT_MOD
             "session_id": session["session_id"],
             "app_session_path": _relative_artifact_path(session_file, root_path),
             "cards_path": _relative_artifact_path(cards_file, root_path),
-            "report_path": _relative_artifact_path(report, root_path),
-            "retune_goal_path": _relative_artifact_path(retune, root_path),
+            "report_path": report_ref,
+            "retune_goal_path": retune_ref,
             "card_count": len(cards["cards"]),
             "raw_transcript_stored": False,
         }

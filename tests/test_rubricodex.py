@@ -620,6 +620,24 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertIn("cards.json is missing", str(context.exception))
 
+    def test_app_collect_rejects_stale_report_and_retune_card_refs(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        cards = sample_app_cards()
+        cards["cards"][2]["artifact_refs"] = [".rubricodex/runs/other/report.md"]
+        cards["cards"][3]["artifact_refs"] = [".rubricodex/runs/other/retune_goal.md"]
+        write_json(app_cards_path(self.root, "example-session"), cards)
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        with self.assertRaises(ArtifactError) as context:
+            collect_app_artifacts(self.root, "example-v0.1")
+
+        message = str(context.exception)
+        self.assertIn("report card must reference", message)
+        self.assertIn("retune card must reference", message)
+
     def test_orchestrate_run_and_status_complete_shared_flow(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
