@@ -18,19 +18,20 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 ## Flow
 
 1. Classify the request as `micro`, `quick`, `standard`, `strict`, or `audit`.
-2. For Codex app entry, write or import `.rubricodex/app/sessions/<session-id>/app-session.json` and `cards.json`.
-3. Write or validate `.rubricodex/intent/brief.json`.
-4. Write or validate `.rubricodex/matrix/evaluation-matrix.json`.
-5. Run `rubricodex app session import --from <app-session.json>` when the request began in the app.
-6. Run `rubricodex goal compile --run-id <run-id>` to create `goal.md`, `adapter-input.json`, and `goal.lock.json`.
-7. Run `rubricodex prompt lint --run-id <run-id>`.
-8. Run `rubricodex matrix lock --run-id <run-id>` before implementation and again before scoring when standard/strict/audit criteria must not drift.
-9. Implement the task or collect the completed implementation references.
-10. Save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json` before scoring.
-11. Run `rubricodex orchestrate run --run-id <run-id>` to create local handoff, probe, scorecard, report, retune, and app collection artifacts from the current evidence.
-12. Use lower-level `run local`, `probe plan`, `probe run`, `score compute`, and `report` commands only when debugging a single phase.
-13. Run `rubricodex orchestrate status --run-id <run-id>` and `rubricodex app collect --run-id <run-id>` to verify app/local artifacts share the same report and retune instruction.
-14. Preserve pass criteria listed in the retune `Exclude` section unless the user explicitly approves a scope change.
+2. For natural-language starts, run `rubricodex plan draft --run-id <run-id> --goal "<goal>"` to create readiness, intent brief, evaluation matrix, `goal.md`, prompt lint, and matrix lock.
+3. For Codex app entry, write or import `.rubricodex/app/sessions/<session-id>/app-session.json` and `cards.json`.
+4. Write or validate `.rubricodex/intent/brief.json`.
+5. Write or validate `.rubricodex/matrix/evaluation-matrix.json`.
+6. Run `rubricodex app session import --from <app-session.json>` when the request began in the app.
+7. Run `rubricodex goal compile --run-id <run-id>` to create `goal.md`, `adapter-input.json`, and `goal.lock.json` when the draft command was not used.
+8. Run `rubricodex prompt lint --run-id <run-id>`.
+9. Run `rubricodex matrix lock --run-id <run-id>` before implementation and again before scoring when standard/strict/audit criteria must not drift.
+10. Implement the task or collect the completed implementation references.
+11. Save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json` before scoring.
+12. Run `rubricodex orchestrate run --run-id <run-id>` to create local handoff, probe, scorecard, report, retune, and app collection artifacts from the current evidence.
+13. Use lower-level `run local`, `probe plan`, `probe run`, `score compute`, and `report` commands only when debugging a single phase.
+14. Run `rubricodex orchestrate status --run-id <run-id>` and `rubricodex app collect --run-id <run-id>` to verify app/local artifacts share the same report and retune instruction.
+15. Preserve pass criteria listed in the retune `Exclude` section unless the user explicitly approves a scope change.
 
 ## Artifact Contract
 
