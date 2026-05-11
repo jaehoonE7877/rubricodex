@@ -52,6 +52,61 @@ MODE_CRITERIA_RANGE = {
     "audit": (3, 7),
 }
 
+MODE_DRAFT_CRITERIA_COUNT = {
+    "micro": 2,
+    "quick": 3,
+    "standard": 5,
+    "strict": 6,
+    "audit": 3,
+}
+
+AUDIT_KEYWORDS = {
+    "audit",
+    "review",
+    "검토",
+    "리뷰",
+    "감사",
+    "분석",
+}
+
+STRICT_KEYWORDS = {
+    "auth",
+    "authorization",
+    "billing",
+    "delete",
+    "migration",
+    "payment",
+    "permission",
+    "privacy",
+    "security",
+    "결제",
+    "권한",
+    "개인정보",
+    "마이그레이션",
+    "삭제",
+    "보안",
+    "인증",
+}
+
+MICRO_KEYWORDS = {
+    "copy",
+    "rename",
+    "typo",
+    "wording",
+    "문구",
+    "오타",
+    "이름",
+}
+
+QUICK_KEYWORDS = {
+    "bug",
+    "fix",
+    "small",
+    "간단",
+    "버그",
+    "수정",
+}
+
 FORBIDDEN_KEYS = {
     "raw_transcript",
     "raw_chat_transcript",
@@ -322,6 +377,294 @@ def init_project(
     }
     write_json(config_path, config)
     return [config_path]
+
+
+def _contains_any(text: str, keywords: set[str]) -> bool:
+    lowered = text.lower()
+    return any(keyword in lowered for keyword in keywords)
+
+
+def classify_mode(goal: str, requested_mode: str = "auto") -> str:
+    mode = requested_mode.strip().lower() if requested_mode else "auto"
+    if mode != "auto":
+        return mode
+
+    words = [word for word in goal.replace("\n", " ").split(" ") if word.strip()]
+    if _contains_any(goal, AUDIT_KEYWORDS):
+        return "audit"
+    if _contains_any(goal, STRICT_KEYWORDS):
+        return "strict"
+    if len(words) <= 8 and _contains_any(goal, MICRO_KEYWORDS):
+        return "micro"
+    if len(words) <= 18 and _contains_any(goal, QUICK_KEYWORDS):
+        return "quick"
+    return DEFAULT_MODE
+
+
+def assess_request_readiness(goal: str, mode: str) -> dict[str, Any]:
+    text = goal.strip()
+    lowered = text.lower()
+    checks = [
+        {
+            "id": "outcome",
+            "label": "Desired outcome",
+            "passed": len(text) >= 12,
+        },
+        {
+            "id": "deliverable",
+            "label": "Deliverable shape",
+            "passed": _contains_any(
+                lowered,
+                {
+                    "api",
+                    "app",
+                    "cli",
+                    "code",
+                    "doc",
+                    "endpoint",
+                    "page",
+                    "report",
+                    "test",
+                    "ui",
+                    "문서",
+                    "리포트",
+                    "엔드포인트",
+                    "코드",
+                    "테스트",
+                    "페이지",
+                    "화면",
+                },
+            ),
+        },
+        {
+            "id": "scope",
+            "label": "Scope boundary",
+            "passed": _contains_any(lowered, {"only", "except", "without", "제외", "범위"}),
+        },
+        {
+            "id": "evidence",
+            "label": "Evidence expectation",
+            "passed": _contains_any(lowered, {"evidence", "test", "verify", "검증", "근거", "테스트"}),
+        },
+        {
+            "id": "context",
+            "label": "Reference context",
+            "passed": "/" in text or "." in text or _contains_any(lowered, {"file", "repo", "기존", "파일", "레포"}),
+        },
+        {
+            "id": "risk",
+            "label": "Risk signal",
+            "passed": mode in {"micro", "quick"} or _contains_any(lowered, STRICT_KEYWORDS | {"risk", "위험"}),
+        },
+    ]
+    passed = sum(1 for check in checks if check["passed"])
+    assumptions = []
+    if not checks[1]["passed"]:
+        assumptions.append("Treat the deliverable as a repository change unless context says otherwise.")
+    if not checks[2]["passed"]:
+        assumptions.append("Keep scope to the smallest useful version of the requested outcome.")
+    if not checks[3]["passed"]:
+        assumptions.append("Use summarized test, file, or review evidence instead of raw output.")
+    if not assumptions:
+        assumptions.append("No extra product scope is assumed beyond the stated goal.")
+    questions = [
+        f"Clarify {check['label']} if this assumption is wrong."
+        for check in checks
+        if not check["passed"]
+    ][:3]
+    if passed >= 5 or (mode in {"micro", "quick"} and passed >= 3):
+        status = "ready"
+    elif passed >= 2:
+        status = "needs_assumption"
+    else:
+        status = "needs_clarification"
+    return {
+        "score": passed,
+        "max_score": len(checks),
+        "status": status,
+        "checks": checks,
+        "assumptions": assumptions,
+        "clarification_questions": questions,
+    }
+
+
+def _draft_deliverable(goal: str, mode: str) -> str:
+    if mode == "audit":
+        return "A read-only review report with findings, evidence references, and residual risk."
+    if mode == "micro":
+        return "A minimal patch or content update with summarized verification evidence."
+    if mode == "strict":
+        return "A scoped implementation with tests, risk notes, and summarized verification evidence."
+    return "A small implementation patch with tests or equivalent summarized verification evidence."
+
+
+def draft_brief(goal: str, mode: str, task_kind: str = "implementation") -> dict[str, Any]:
+    goal_summary = " ".join(goal.strip().split())
+    readiness = assess_request_readiness(goal_summary, mode)
+    brief = base_artifact(BRIEF_TYPE, mode=mode)
+    brief.update(
+        {
+            "task_kind": task_kind,
+            "request_readiness": readiness,
+            "blocks": {
+                "purpose": f"Complete the requested Rubricodex task: {goal_summary}",
+                "desired_outcome": "A bounded result that satisfies the user's stated outcome and the generated evaluation matrix.",
+                "deliverable_shape": _draft_deliverable(goal_summary, mode),
+                "reference_context": [
+                    "Current repository and user-provided context.",
+                    "Notion Canonical SSoT when product or contract meaning is unclear.",
+                ],
+                "scope_in": [
+                    goal_summary,
+                    "Use the smallest implementation or review path that can satisfy the evaluation matrix.",
+                ],
+                "scope_out": [
+                    "Unrequested product scope.",
+                    "Raw transcript, raw task log, or unredacted command output storage.",
+                ],
+                "working_rules": [
+                    "Prefer simple, explicit changes.",
+                    "Keep evidence summarized and reference-based.",
+                    "Do not change passed criteria during retune unless the user approves scope change.",
+                ],
+                "evaluation_basis": [
+                    "Intent alignment.",
+                    "Mode-appropriate completeness.",
+                    "Evidence quality.",
+                    "Raw storage policy compliance.",
+                ],
+                "done_when": [
+                    "Hard gates pass or a retune instruction explains the remaining blocker.",
+                    "Report and scorecard cite summarized evidence for every criterion.",
+                ],
+            },
+        }
+    )
+    return brief
+
+
+def _draft_criterion(index: int, name: str, claim: str, evidence: str, hard_gate: bool) -> dict[str, Any]:
+    criterion_id = f"C-{index:02d}"
+    return {
+        "id": criterion_id,
+        "name": name,
+        "claim": claim,
+        "check_question": f"Is {name.lower()} satisfied with summarized evidence?",
+        "evidence_required": [evidence],
+        "hard_gate": hard_gate,
+        "levels": {
+            "pass": "Summarized evidence proves this criterion.",
+            "partial": "Evidence is present but incomplete.",
+            "fail": "Evidence disproves this criterion or the criterion is not implemented.",
+        },
+        "retune_hint": f"Fix {criterion_id} without reworking criteria already marked pass.",
+    }
+
+
+def draft_matrix(goal: str, mode: str) -> dict[str, Any]:
+    count = MODE_DRAFT_CRITERIA_COUNT.get(mode, MODE_DRAFT_CRITERIA_COUNT[DEFAULT_MODE])
+    templates = [
+        (
+            "Intent alignment",
+            "The result directly addresses the drafted user goal.",
+            "Changed files, review notes, or report summary showing the goal is addressed.",
+            True,
+        ),
+        (
+            "Scope control",
+            "The work stays inside scope_in and avoids scope_out.",
+            "Summary of included and excluded scope, plus any deferred items.",
+            mode in {"standard", "strict", "audit"},
+        ),
+        (
+            "Evidence quality",
+            "The run records enough summarized evidence to judge the result.",
+            "Test, typecheck, review, or manual verification summary without raw output.",
+            mode in {"strict", "audit"},
+        ),
+        (
+            "Mode fit",
+            "The harness effort matches the selected mode.",
+            "Mode choice and why it is sufficient for the risk level.",
+            False,
+        ),
+        (
+            "Report and retune usability",
+            "Report and retune instructions are clear and bounded.",
+            "Scorecard/report/retune references with failed criteria isolated.",
+            False,
+        ),
+        (
+            "Risk and policy compliance",
+            "High-risk or policy-sensitive work is handled conservatively.",
+            "Risk notes and confirmation that raw transcript/log/output storage is absent.",
+            mode == "strict",
+        ),
+        (
+            "Regression protection",
+            "Existing behavior relevant to the task remains intact.",
+            "Focused regression test or review summary.",
+            mode == "strict",
+        ),
+        (
+            "Audit objectivity",
+            "The audit reports findings before summaries and avoids speculative fixes.",
+            "Finding list with evidence references and residual risk.",
+            mode == "audit",
+        ),
+    ]
+    selected = templates[:count]
+    matrix = base_artifact(MATRIX_TYPE, mode=mode)
+    matrix.update(
+        {
+            "method": "gqe-r-lite",
+            "draft_goal": " ".join(goal.strip().split()),
+            "criteria": [
+                _draft_criterion(index, name, claim, evidence, hard_gate)
+                for index, (name, claim, evidence, hard_gate) in enumerate(selected, start=1)
+            ],
+        }
+    )
+    return matrix
+
+
+def draft_harness(
+    root: Path | str,
+    run_id: str,
+    goal: str,
+    mode: str = "auto",
+    task_kind: str = "implementation",
+    executor: str = DEFAULT_EXECUTOR,
+) -> dict[str, Any]:
+    goal_text = goal.strip()
+    if not goal_text:
+        raise ArtifactError([ValidationIssue("$.goal", "goal must be non-empty")])
+    active_mode = classify_mode(goal_text, mode)
+    if active_mode not in MODE_CRITERIA_RANGE:
+        raise ArtifactError([ValidationIssue("$.mode", f"mode must be auto or one of {', '.join(MODE_CRITERIA_RANGE)}")])
+
+    root_path = Path(root)
+    init_project(root_path, mode=active_mode, executor=executor)
+    brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
+    matrix = draft_matrix(goal_text, active_mode)
+    assert_valid(validate_brief(brief, active_mode))
+    assert_valid(validate_matrix(matrix, active_mode))
+    write_json(intent_path(root_path), brief)
+    write_json(matrix_path(root_path), matrix)
+    paths = compile_goal(root_path, run_id, mode=active_mode, executor=executor)
+    lint = lint_goal_file(root_path, run_id, mode=active_mode)
+    lock = verify_matrix_lock(root_path, run_id, mode=active_mode)
+    return {
+        "status": "pass" if lint["status"] == "pass" and lock["status"] == "pass" else "fail",
+        "mode": active_mode,
+        "run_id": run_id,
+        "readiness": brief["request_readiness"],
+        "paths": {name: str(path) for name, path in paths.items()},
+        "brief_path": str(intent_path(root_path)),
+        "matrix_path": str(matrix_path(root_path)),
+        "prompt_lint_status": lint["status"],
+        "matrix_lock_status": lock["status"],
+    }
 
 
 def validate_forbidden_keys(value: Any, path: str = "$") -> list[ValidationIssue]:

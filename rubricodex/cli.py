@@ -12,6 +12,7 @@ from .artifacts import (
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    draft_harness,
     import_app_session,
     init_project,
     lint_goal_file,
@@ -76,6 +77,19 @@ def cmd_matrix_lock(args: argparse.Namespace) -> int:
         brief_file=args.brief,
         matrix_file=args.matrix,
         goal_file=args.goal,
+    )
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
+
+
+def cmd_plan_draft(args: argparse.Namespace) -> int:
+    result = draft_harness(
+        args.root,
+        args.run_id,
+        args.goal,
+        mode=args.plan_mode,
+        task_kind=args.task_kind,
+        executor=args.executor,
     )
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
@@ -229,6 +243,17 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--executor", default=DEFAULT_EXECUTOR)
     init.add_argument("--force", action="store_true")
     init.set_defaults(func=cmd_init)
+
+    plan = subparsers.add_parser("plan")
+    plan_sub = plan.add_subparsers(dest="plan_command", required=True)
+    plan_draft = plan_sub.add_parser("draft")
+    plan_draft.add_argument("--root", default=argparse.SUPPRESS, help="Project root containing .rubricodex")
+    plan_draft.add_argument("--run-id", required=True)
+    plan_draft.add_argument("--goal", required=True)
+    plan_draft.add_argument("--plan-mode", "--mode", dest="plan_mode", default="auto", help="auto, micro, quick, standard, strict, or audit")
+    plan_draft.add_argument("--task-kind", default="implementation")
+    plan_draft.add_argument("--executor", default=DEFAULT_EXECUTOR)
+    plan_draft.set_defaults(func=cmd_plan_draft)
 
     intent = subparsers.add_parser("intent")
     intent_sub = intent.add_subparsers(dest="intent_command", required=True)
