@@ -289,6 +289,20 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertIn("warning", str(result["issues"]))
 
+    def test_matrix_lock_requires_criterion_in_evaluation_section(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        matrix["criteria"].append(criterion(6))
+        write_json(matrix_path(self.root), matrix)
+        goal = self.root / ".rubricodex" / "taskpacks" / "example-v0.1" / "goal.md"
+        goal.write_text(
+            goal.read_text(encoding="utf-8") + "\nC-06 is mentioned outside the evaluation section.\n",
+            encoding="utf-8",
+        )
+        result = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("goal.md is missing criterion C-06", str(result["issues"]))
+
     def test_matrix_lock_approved_safe_revision_writes_new_lock(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -300,9 +314,12 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(failed["status"], "fail")
 
         goal = self.root / ".rubricodex" / "taskpacks" / "example-v0.1" / "goal.md"
+        goal_text = goal.read_text(encoding="utf-8")
         goal.write_text(
-            goal.read_text(encoding="utf-8")
-            + "- C-06 (supporting): Does criterion 6 have summarized evidence? Evidence: Evidence summary for C-06\n",
+            goal_text.replace(
+                "\n## Evidence\n",
+                "\n- C-06 (supporting): Does criterion 6 have summarized evidence? Evidence: Evidence summary for C-06\n\n## Evidence\n",
+            ),
             encoding="utf-8",
         )
         approved = verify_matrix_lock(self.root, "example-v0.1", revision_reason="Add report quality criterion.")

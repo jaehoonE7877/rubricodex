@@ -596,8 +596,9 @@ def validate_matrix_lock(
                 )
             )
 
+    evaluation_text = _section_content(goal_text, "Evaluation") or ""
     for criterion_id in current_criteria:
-        if criterion_id not in goal_text:
+        if criterion_id not in evaluation_text:
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
     return issues
 
