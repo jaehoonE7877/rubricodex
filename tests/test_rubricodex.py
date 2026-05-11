@@ -400,6 +400,7 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("작은 버그 수정", "auto"), "quick")
         self.assertEqual(classify_mode("권한 migration을 안전하게 수정", "auto"), "strict")
         self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
+        self.assertEqual(classify_mode("Implement authentication middleware with tests", "auto"), "strict")
         self.assertEqual(classify_mode("review and fix auth bug", "auto"), "strict")
         self.assertEqual(classify_mode("review and delete old auth route", "auto"), "strict")
         self.assertEqual(classify_mode("review and remove old route", "auto"), "strict")
@@ -490,6 +491,30 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn('"mode": "strict"', stdout.getvalue())
         matrix = read_json(matrix_path(self.root / "plan"))
         self.assertEqual(len(matrix["criteria"]), 6)
+
+    def test_cli_plan_draft_explicit_auto_overrides_global_mode(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "--mode",
+                    "strict",
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "explicit-auto-draft",
+                    "--mode",
+                    "auto",
+                    "--goal",
+                    "작은 버그 수정",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"mode": "quick"', stdout.getvalue())
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(len(matrix["criteria"]), 3)
 
     def test_cli_followup_commands_infer_drafted_mode(self) -> None:
         with redirect_stdout(StringIO()):

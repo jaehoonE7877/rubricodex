@@ -87,6 +87,17 @@ def _mode_option_present(argv: list[str]) -> bool:
     return any(item == "--mode" or item.startswith("--mode=") for item in argv)
 
 
+def _plan_draft_mode_option_present(argv: list[str]) -> bool:
+    for index in range(len(argv) - 1):
+        if argv[index] == "plan" and argv[index + 1] == "draft":
+            draft_args = argv[index + 2 :]
+            return any(
+                item in {"--mode", "--plan-mode"} or item.startswith("--mode=") or item.startswith("--plan-mode=")
+                for item in draft_args
+            )
+    return False
+
+
 def _artifact_mode(root: Path | str) -> str:
     try:
         mode = read_json(matrix_path(root)).get("mode")
@@ -148,7 +159,7 @@ def cmd_matrix_lock(args: argparse.Namespace) -> int:
 
 def cmd_plan_draft(args: argparse.Namespace) -> int:
     mode = args.plan_mode
-    if mode == "auto" and args.global_mode:
+    if mode == "auto" and args.global_mode and not args.plan_mode_explicit:
         mode = args.global_mode
     result = draft_harness(
         args.root,
@@ -465,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(raw_argv)
     args.global_mode = _global_mode(raw_argv)
     args.mode_explicit = _mode_option_present(raw_argv)
+    args.plan_mode_explicit = _plan_draft_mode_option_present(raw_argv)
     try:
         return args.func(args)
     except ArtifactError as error:

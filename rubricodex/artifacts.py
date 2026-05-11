@@ -72,6 +72,7 @@ AUDIT_KEYWORDS = {
 
 STRICT_KEYWORDS = {
     "auth",
+    "authentication",
     "authorization",
     "billing",
     "delete",
