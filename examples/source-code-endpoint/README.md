@@ -1,6 +1,6 @@
 # Source Code Endpoint Fixture
 
-이 fixture는 Rubricodex v0.1의 local plugin-style CLI flow를 검증합니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 보여줍니다.
+이 fixture는 Rubricodex의 local plugin-style CLI flow를 검증합니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 보여줍니다.
 
 ## Example Mention
 
@@ -15,8 +15,9 @@
 3. `rubricodex goal compile --run-id example-v0.1`로 taskpack을 생성합니다.
 4. `rubricodex prompt lint --run-id example-v0.1`로 실행 prompt를 확인합니다.
 5. `rubricodex matrix lock --run-id example-v0.1`로 기준 drift를 확인합니다.
-6. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
-7. `rubricodex score compute --run-id example-v0.1`와 `rubricodex report --run-id example-v0.1`로 scorecard/report/retune instruction을 생성합니다.
+6. `rubricodex run local --run-id example-v0.1`로 Codex CLI handoff manifest를 생성합니다.
+7. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
+8. `rubricodex score compute --run-id example-v0.1`와 `rubricodex report --run-id example-v0.1`로 scorecard/report/retune instruction을 생성합니다.
 
 ## Modes
 
@@ -34,6 +35,7 @@
 python3 -m rubricodex.cli --root examples/source-code-endpoint goal compile --run-id example-v0.1
 python3 -m rubricodex.cli --root examples/source-code-endpoint prompt lint --run-id example-v0.1
 python3 -m rubricodex.cli --root examples/source-code-endpoint matrix lock --run-id example-v0.1
+python3 -m rubricodex.cli --root examples/source-code-endpoint run local --run-id example-v0.1
 python3 -m rubricodex.cli --root examples/source-code-endpoint score compute --run-id example-v0.1
 python3 -m rubricodex.cli --root examples/source-code-endpoint report --run-id example-v0.1
 npm test

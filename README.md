@@ -43,15 +43,16 @@ python3 -m rubricodex.cli init
 python3 -m rubricodex.cli goal compile --run-id example-v0.1
 python3 -m rubricodex.cli prompt lint --run-id example-v0.1
 python3 -m rubricodex.cli matrix lock --run-id example-v0.1
+python3 -m rubricodex.cli run local --run-id example-v0.1
 python3 -m rubricodex.cli score compute --run-id example-v0.1
 python3 -m rubricodex.cli report --run-id example-v0.1
 ```
 
-Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. v0.1은 skill + local CLI 계약이며 Codex CLI 프로세스를 직접 실행하지 않습니다.
+Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. 로컬 runner는 기본적으로 dry-run handoff만 기록하며, 직접 Codex CLI 실행은 `--execute`로 명시할 때만 시도합니다.
 
-## v0.1 Fixture
+## Fixture
 
-첫 v0.1 fixture는 [examples/source-code-endpoint](examples/source-code-endpoint)에 있습니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
+[examples/source-code-endpoint](examples/source-code-endpoint)는 `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
 
 ## Product SSoT
 

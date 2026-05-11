@@ -12,7 +12,7 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - Canonical product decisions live in the Notion Rubricodex Canonical SSoT.
 - Use the official names `Rubricodex`, `.rubricodex/`, and `rubricodex`.
 - Do not store raw transcripts, raw task logs, or unredacted command output in repo artifacts or Notion.
-- v0.1 is a plugin-style skill plus local CLI. It does not directly run Codex CLI or app internals.
+- The local runner records only a manifest and summarized evidence. Direct Codex CLI execution is opt-in via `rubricodex run local --execute`.
 
 ## Flow
 
@@ -22,9 +22,10 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 4. Run `rubricodex goal compile --run-id <run-id>` to create `goal.md`, `adapter-input.json`, and `goal.lock.json`.
 5. Run `rubricodex prompt lint --run-id <run-id>`.
 6. Run `rubricodex matrix lock --run-id <run-id>` before implementation and again before scoring when standard/strict/audit criteria must not drift.
-7. After implementation, save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json`.
-8. Run `rubricodex score compute --run-id <run-id>`.
-9. Run `rubricodex report --run-id <run-id>` and use `retune_goal.md` only for failed, partial, or missing criteria.
+7. Run `rubricodex run local --run-id <run-id>` to create a dry-run handoff manifest, or add `--execute` only when direct Codex CLI execution is intended.
+8. After implementation, save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json`.
+9. Run `rubricodex score compute --run-id <run-id>`.
+10. Run `rubricodex report --run-id <run-id>` and use `retune_goal.md` only for failed, partial, or missing criteria.
 
 ## Artifact Contract
 
@@ -32,6 +33,7 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - Matrix: `.rubricodex/matrix/evaluation-matrix.json`
 - Taskpack: `.rubricodex/taskpacks/<run_id>/goal.md`
 - Matrix lock: `.rubricodex/taskpacks/<run_id>/goal.lock.json`
+- Run manifest: `.rubricodex/runs/<run_id>/run-manifest.json`
 - Evidence: `.rubricodex/runs/<run_id>/evidence.json`
 - Scorecard: `.rubricodex/runs/<run_id>/scorecard.json`
 - Report: `.rubricodex/runs/<run_id>/report.md`
