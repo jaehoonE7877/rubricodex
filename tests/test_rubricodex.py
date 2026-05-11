@@ -349,6 +349,13 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
         self.assertEqual(classify_mode("관리자 대시보드를 만들어줘", "auto"), "standard")
 
+    def test_audit_draft_includes_audit_specific_criterion(self) -> None:
+        draft_harness(self.root, "audit-draft", "현재 diff review", mode="audit")
+
+        matrix = read_json(matrix_path(self.root))
+
+        self.assertIn("Audit objectivity", {criterion["name"] for criterion in matrix["criteria"]})
+
     def test_v10_all_modes_draft_and_orchestrate(self) -> None:
         mode_goals = {
             "micro": "오타 문구 수정",
@@ -393,6 +400,28 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn('"mode": "quick"', stdout.getvalue())
         self.assertIn('"status": "pass"', stdout.getvalue())
         self.assertTrue((self.root / ".rubricodex/taskpacks/cli-draft/goal.md").is_file())
+
+    def test_cli_plan_draft_honors_global_mode(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "--mode",
+                    "strict",
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "global-mode-draft",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"mode": "strict"', stdout.getvalue())
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(len(matrix["criteria"]), 6)
 
     def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
         self.write_default_contract()

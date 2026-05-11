@@ -41,6 +41,11 @@ flowchart LR
 ```bash
 python3 -m rubricodex.cli init
 python3 -m rubricodex.cli plan draft --run-id example-v1.0 --goal "관리자 dashboard page를 만들고 test evidence를 남겨줘."
+```
+
+Lower-level phase commands can still operate on an existing fixture run:
+
+```bash
 python3 -m rubricodex.cli goal compile --run-id example-v0.1
 python3 -m rubricodex.cli prompt lint --run-id example-v0.1
 python3 -m rubricodex.cli matrix lock --run-id example-v0.1

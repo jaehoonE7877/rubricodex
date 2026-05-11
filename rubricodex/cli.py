@@ -48,6 +48,35 @@ def _validation_result(kind: str, issues: list) -> dict:
     return _result("pass" if not issues else "fail", kind=kind, issues=[issue.as_dict() for issue in issues])
 
 
+def _global_mode(argv: list[str]) -> str | None:
+    command_names = {
+        "init",
+        "plan",
+        "intent",
+        "matrix",
+        "goal",
+        "prompt",
+        "evidence",
+        "score",
+        "report",
+        "run",
+        "probe",
+        "app",
+        "orchestrate",
+    }
+    before_command = []
+    for item in argv:
+        if item in command_names:
+            break
+        before_command.append(item)
+    for index, item in enumerate(before_command):
+        if item == "--mode" and index + 1 < len(before_command):
+            return before_command[index + 1]
+        if item.startswith("--mode="):
+            return item.split("=", 1)[1]
+    return None
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     paths = init_project(args.root, mode=args.mode, executor=args.executor, force=args.force)
     _print_json(_result("pass", paths=[str(path) for path in paths]))
@@ -83,11 +112,14 @@ def cmd_matrix_lock(args: argparse.Namespace) -> int:
 
 
 def cmd_plan_draft(args: argparse.Namespace) -> int:
+    mode = args.plan_mode
+    if mode == "auto" and args.global_mode:
+        mode = args.global_mode
     result = draft_harness(
         args.root,
         args.run_id,
         args.goal,
-        mode=args.plan_mode,
+        mode=mode,
         task_kind=args.task_kind,
         executor=args.executor,
     )
@@ -394,7 +426,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    args.global_mode = _global_mode(raw_argv)
     try:
         return args.func(args)
     except ArtifactError as error:

@@ -613,7 +613,10 @@ def draft_matrix(goal: str, mode: str) -> dict[str, Any]:
             mode == "audit",
         ),
     ]
-    selected = templates[:count]
+    if mode == "audit":
+        selected = [templates[0], templates[2], templates[7]]
+    else:
+        selected = templates[:count]
     matrix = base_artifact(MATRIX_TYPE, mode=mode)
     matrix.update(
         {
