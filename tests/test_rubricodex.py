@@ -13,6 +13,8 @@ from rubricodex.artifacts import (
     BRIEF_TYPE,
     EVIDENCE_TYPE,
     MATRIX_TYPE,
+    PROBE_PLAN_TYPE,
+    PROBE_RESULT_TYPE,
     RUN_MANIFEST_TYPE,
     SCHEMA_VERSION,
     SCORECARD_TYPE,
@@ -23,13 +25,20 @@ from rubricodex.artifacts import (
     intent_path,
     lint_goal_file,
     matrix_path,
+    plan_probes,
+    probe_plan_path,
+    probe_prompt_path,
+    probe_result_path,
     read_json,
     run_local,
+    run_probes,
     run_dir,
     run_manifest_path,
     validate_brief,
     validate_evidence,
     validate_matrix,
+    validate_probe_plan,
+    validate_probe_result,
     validate_run_manifest,
     verify_matrix_lock,
     validate_scorecard,
@@ -491,6 +500,125 @@ class RubricodexContractTests(unittest.TestCase):
         }
         self.assertTrue(validate_run_manifest(manifest))
 
+    def test_probe_plan_selects_hard_gates_and_skips_supporting(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = plan_probes(self.root, "example-v0.1")
+
+        plan = read_json(probe_plan_path(self.root, "example-v0.1"))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(plan["artifact_type"], PROBE_PLAN_TYPE)
+        self.assertEqual([probe["criterion_id"] for probe in plan["selected_probes"]], ["C-01", "C-02"])
+        self.assertEqual({item["criterion_id"] for item in plan["skipped_probes"]}, {"C-03", "C-04", "C-05"})
+        self.assertTrue(all(item["skip_reason"] for item in plan["skipped_probes"]))
+        self.assertEqual(validate_probe_plan(plan), [])
+
+        prompt = probe_prompt_path(self.root, "example-v0.1", "C-01").read_text(encoding="utf-8")
+        self.assertIn("read-only", prompt.lower())
+        self.assertIn("Do not modify files", prompt)
+
+    def test_probe_plan_includes_explicit_supporting_criterion(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        plan_probes(self.root, "example-v0.1", criterion_ids=["C-05"])
+
+        plan = read_json(probe_plan_path(self.root, "example-v0.1"))
+        self.assertEqual(
+            [probe["criterion_id"] for probe in plan["selected_probes"]],
+            ["C-01", "C-02", "C-05"],
+        )
+
+    def test_probe_run_dry_run_writes_normalized_results_without_raw_output(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        plan_probes(self.root, "example-v0.1")
+
+        result = run_probes(self.root, "example-v0.1", parallel=2)
+
+        probe_result = read_json(probe_result_path(self.root, "example-v0.1", "C-01"))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(probe_result["artifact_type"], PROBE_RESULT_TYPE)
+        self.assertEqual(probe_result["status"], "probe_skipped")
+        self.assertTrue(probe_result["read_only"])
+        self.assertFalse(probe_result["raw_output_stored"])
+        self.assertEqual(validate_probe_result(probe_result), [])
+        self.assertNotIn("stdout", str(probe_result).lower())
+        self.assertNotIn("stderr", str(probe_result).lower())
+
+    def test_probe_run_execute_nonzero_is_probe_error(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        plan_probes(self.root, "example-v0.1", criterion_ids=["C-01"])
+
+        result = run_probes(self.root, "example-v0.1", execute=True, codex_bin="false")
+
+        probe_result = read_json(probe_result_path(self.root, "example-v0.1", "C-01"))
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(probe_result["status"], "probe_error")
+        self.assertEqual(probe_result["exit_code"], 1)
+        self.assertEqual(validate_probe_result(probe_result), [])
+
+    def test_probe_result_rejects_raw_output_fields(self) -> None:
+        probe_result = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": PROBE_RESULT_TYPE,
+            "rubricodex_version": "0.1.0",
+            "created_at": "2026-05-11T00:00:00Z",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "criterion_id": "C-01",
+            "status": "probe_failure",
+            "summary": "Probe found missing evidence.",
+            "read_only": True,
+            "raw_output_stored": False,
+            "stdout": "raw",
+        }
+        self.assertTrue(validate_probe_result(probe_result))
+
+    def test_cli_probe_plan_and_run_write_results(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        with redirect_stdout(StringIO()) as plan_stdout:
+            plan_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "probe",
+                    "plan",
+                    "--run-id",
+                    "example-v0.1",
+                    "--criterion-id",
+                    "C-05",
+                ]
+            )
+        with redirect_stdout(StringIO()) as run_stdout:
+            run_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "probe",
+                    "run",
+                    "--run-id",
+                    "example-v0.1",
+                    "--parallel",
+                    "2",
+                ]
+            )
+
+        self.assertEqual(plan_exit, 0)
+        self.assertEqual(run_exit, 0)
+        self.assertIn("probe-plan.json", plan_stdout.getvalue())
+        self.assertIn("probe_results", run_stdout.getvalue())
+        self.assertTrue(probe_result_path(self.root, "example-v0.1", "C-05").is_file())
+
     def test_scorecard_pass_all_pass(self) -> None:
         matrix = self.write_default_contract()
         write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
@@ -544,6 +672,23 @@ class RubricodexContractTests(unittest.TestCase):
         for heading in ("# Rubricodex Report", "## Summary", "## Criteria", "## Next action"):
             self.assertIn(heading, text)
 
+    def test_report_includes_probe_skip_reasons(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        plan_probes(self.root, "example-v0.1")
+        run_probes(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        compute_scorecard(self.root, "example-v0.1")
+
+        paths = write_report(self.root, "example-v0.1")
+
+        text = paths["report"].read_text(encoding="utf-8")
+        self.assertIn("## Probes", text)
+        self.assertIn("C-03 skipped", text)
+        self.assertIn("supporting criterion skipped", text)
+        self.assertIn("C-01: probe_skipped", text)
+
     def test_retune_goal_only_mentions_failed_or_partial_criteria(self) -> None:
         matrix = self.write_default_contract()
         write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
@@ -576,6 +721,10 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(run_result["status"], "pass")
         manifest = read_json(run_manifest_path(fixture, "example-v0.1"))
         self.assertEqual(validate_run_manifest(manifest), [])
+        probe_plan = plan_probes(fixture, "example-v0.1")
+        self.assertEqual(probe_plan["status"], "pass")
+        probe_run = run_probes(fixture, "example-v0.1", parallel=2)
+        self.assertEqual(probe_run["status"], "pass")
         scorecard = compute_scorecard(fixture, "example-v0.1")
         self.assertIn(scorecard["decision"], {"pass", "pass_with_warnings"})
         paths = write_report(fixture, "example-v0.1")

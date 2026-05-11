@@ -23,9 +23,11 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 5. Run `rubricodex prompt lint --run-id <run-id>`.
 6. Run `rubricodex matrix lock --run-id <run-id>` before implementation and again before scoring when standard/strict/audit criteria must not drift.
 7. Run `rubricodex run local --run-id <run-id>` to create a dry-run handoff manifest, or add `--execute` only when direct Codex CLI execution is intended.
-8. After implementation, save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json`.
-9. Run `rubricodex score compute --run-id <run-id>`.
-10. Run `rubricodex report --run-id <run-id>` and use `retune_goal.md` only for failed, partial, or missing criteria.
+8. Run `rubricodex probe plan --run-id <run-id>` to select only useful read-only probes and record skip reasons.
+9. Run `rubricodex probe run --run-id <run-id> --parallel <N>` to write normalized probe results, or add `--execute` only when direct Codex CLI probe execution is intended.
+10. After implementation, save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json`.
+11. Run `rubricodex score compute --run-id <run-id>`.
+12. Run `rubricodex report --run-id <run-id>` and use `retune_goal.md` only for failed, partial, or missing criteria.
 
 ## Artifact Contract
 
@@ -33,7 +35,10 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - Matrix: `.rubricodex/matrix/evaluation-matrix.json`
 - Taskpack: `.rubricodex/taskpacks/<run_id>/goal.md`
 - Matrix lock: `.rubricodex/taskpacks/<run_id>/goal.lock.json`
+- Probe plan: `.rubricodex/taskpacks/<run_id>/probe-plan.json`
+- Probe prompts: `.rubricodex/taskpacks/<run_id>/probes/<criterion_id>.md`
 - Run manifest: `.rubricodex/runs/<run_id>/run-manifest.json`
+- Probe results: `.rubricodex/runs/<run_id>/probes/<criterion_id>.json`
 - Evidence: `.rubricodex/runs/<run_id>/evidence.json`
 - Scorecard: `.rubricodex/runs/<run_id>/scorecard.json`
 - Report: `.rubricodex/runs/<run_id>/report.md`

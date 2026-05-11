@@ -14,8 +14,10 @@ from .artifacts import (
     init_project,
     lint_goal_file,
     matrix_path,
+    plan_probes,
     read_json,
     run_local,
+    run_probes,
     run_dir,
     validate_brief,
     validate_evidence,
@@ -134,6 +136,32 @@ def cmd_run_local(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "pass" else 1
 
 
+def cmd_probe_plan(args: argparse.Namespace) -> int:
+    result = plan_probes(
+        args.root,
+        args.run_id,
+        mode=args.mode,
+        criterion_ids=args.criterion_id,
+        include_supporting=args.include_supporting,
+        parallel=args.parallel,
+    )
+    _print_json(result)
+    return 0
+
+
+def cmd_probe_run(args: argparse.Namespace) -> int:
+    result = run_probes(
+        args.root,
+        args.run_id,
+        mode=args.mode,
+        parallel=args.parallel,
+        execute=args.execute,
+        codex_bin=args.codex_bin,
+    )
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rubricodex")
     parser.add_argument("--root", default=".", help="Project root containing .rubricodex")
@@ -229,6 +257,23 @@ def build_parser() -> argparse.ArgumentParser:
     run_local_parser.add_argument("--verification-command", action="append", default=[])
     run_local_parser.add_argument("--changed-file", action="append", default=[])
     run_local_parser.set_defaults(func=cmd_run_local)
+
+    probe = subparsers.add_parser("probe")
+    probe_sub = probe.add_subparsers(dest="probe_command", required=True)
+    probe_plan = probe_sub.add_parser("plan")
+    add_common(probe_plan)
+    probe_plan.add_argument("--run-id", required=True)
+    probe_plan.add_argument("--criterion-id", action="append", default=[])
+    probe_plan.add_argument("--include-supporting", action="store_true")
+    probe_plan.add_argument("--parallel", type=int, default=4)
+    probe_plan.set_defaults(func=cmd_probe_plan)
+    probe_run = probe_sub.add_parser("run")
+    add_common(probe_run)
+    probe_run.add_argument("--run-id", required=True)
+    probe_run.add_argument("--parallel", type=int, default=4)
+    probe_run.add_argument("--execute", action="store_true")
+    probe_run.add_argument("--codex-bin", default="codex")
+    probe_run.set_defaults(func=cmd_probe_run)
     return parser
 
 
