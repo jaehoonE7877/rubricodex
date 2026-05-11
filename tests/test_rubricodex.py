@@ -24,6 +24,7 @@ from rubricodex.artifacts import (
     init_project,
     intent_path,
     lint_goal_file,
+    lint_goal_text,
     matrix_path,
     plan_probes,
     probe_plan_path,
@@ -669,8 +670,23 @@ class RubricodexContractTests(unittest.TestCase):
         compute_scorecard(self.root, "example-v0.1")
         paths = write_report(self.root, "example-v0.1")
         text = paths["report"].read_text(encoding="utf-8")
-        for heading in ("# Rubricodex Report", "## Summary", "## Criteria", "## Next action"):
+        for heading in ("# Rubricodex Report", "## Summary", "## Criteria", "## Next action", "## App actions"):
             self.assertIn(heading, text)
+        self.assertIn("Retune targets: C-05", text)
+        self.assertIn("Preserved pass criteria: C-01, C-02, C-03, C-04", text)
+        self.assertIn("Reason:", text)
+        self.assertIn("retune_failed_criteria", text)
+
+    def test_report_highlights_failed_hard_gate(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-01": "fail"}))
+        compute_scorecard(self.root, "example-v0.1")
+
+        paths = write_report(self.root, "example-v0.1")
+
+        text = paths["report"].read_text(encoding="utf-8")
+        self.assertIn("Hard gate alert: C-01 Endpoint contract is fail", text)
+        self.assertIn("Hard gate blocked", text)
 
     def test_report_includes_probe_skip_reasons(self) -> None:
         matrix = self.write_default_contract()
@@ -689,14 +705,33 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("supporting criterion skipped", text)
         self.assertIn("C-01: probe_skipped", text)
 
-    def test_retune_goal_only_mentions_failed_or_partial_criteria(self) -> None:
+    def test_retune_goal_targets_only_failed_partial_or_missing_criteria(self) -> None:
         matrix = self.write_default_contract()
-        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        write_json(
+            run_dir(self.root, "example-v0.1") / "evidence.json",
+            sample_evidence(matrix, {"C-03": "missing_evidence", "C-04": "fail", "C-05": "partial"}),
+        )
         compute_scorecard(self.root, "example-v0.1")
         paths = write_report(self.root, "example-v0.1")
         text = paths["retune"].read_text(encoding="utf-8")
-        self.assertIn("C-05", text)
-        self.assertNotIn("C-01", text)
+        include = text.split("## Include", 1)[1].split("## Exclude", 1)[0]
+        exclude = text.split("## Exclude", 1)[1].split("## Working rules", 1)[0]
+        self.assertIn("C-03", include)
+        self.assertIn("C-04", include)
+        self.assertIn("C-05", include)
+        self.assertNotIn("C-01", include)
+        self.assertIn("C-01", exclude)
+
+    def test_retune_goal_passes_prompt_lint_and_stays_short(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+
+        paths = write_report(self.root, "example-v0.1")
+
+        text = paths["retune"].read_text(encoding="utf-8")
+        self.assertEqual(lint_goal_text(text), [])
+        self.assertLess(len(text), 2400)
 
     def test_legacy_fixture_target_matrix_harness_plan_not_canonical(self) -> None:
         fixture = REPO_ROOT / "examples/source-code-endpoint/.rubricodex"
