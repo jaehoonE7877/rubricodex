@@ -1172,25 +1172,6 @@ def run_local(
     }
 
 
-def _existing_manifest_hints(root: Path, run_id: str) -> dict[str, Any]:
-    manifest_file = run_manifest_path(root, run_id)
-    if not manifest_file.exists():
-        return {}
-    try:
-        manifest = read_json(manifest_file)
-    except (ArtifactError, OSError, json.JSONDecodeError):
-        return {}
-    if manifest.get("artifact_type") != RUN_MANIFEST_TYPE:
-        return {}
-    hints: dict[str, Any] = {}
-    if isinstance(manifest.get("result_summary"), str) and manifest["result_summary"].strip():
-        hints["result_summary"] = manifest["result_summary"]
-    for key in ("verification_commands", "changed_files"):
-        if isinstance(manifest.get(key), list):
-            hints[key] = manifest[key]
-    return hints
-
-
 def _criterion_lookup(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(criterion["id"]): criterion
@@ -1749,9 +1730,16 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
     status_issues: list[ValidationIssue] = []
     if (artifact_root(root_path) / "app" / "sessions").exists():
         try:
-            _find_app_session_for_run(root_path, run_id)
+            session, _session_file = _find_app_session_for_run(root_path, run_id)
             app_session_required = True
             required["app_collection"] = f".rubricodex/runs/{run_id}/app-collection.json"
+            status_issues.extend(validate_app_session(session))
+            cards_file = app_cards_path(root_path, str(session.get("session_id", "")))
+            if cards_file.is_file():
+                cards = read_json(cards_file)
+                status_issues.extend(validate_app_cards(cards, session))
+            else:
+                status_issues.append(ValidationIssue("$.cards_path", f"cards.json is missing at {cards_file}"))
         except ArtifactError as error:
             no_session = any(
                 issue.path == "$.run_id" and issue.message.startswith("no app session")
@@ -1823,14 +1811,12 @@ def orchestrate_run(
     if lock["status"] != "pass":
         status = "fail"
     else:
-        manifest_hints = _existing_manifest_hints(root_path, run_id)
         run_result = run_local(
             root_path,
             run_id,
             mode=mode,
             execute=execute,
             codex_bin=codex_bin,
-            **manifest_hints,
         )
         steps.append({"name": "run_local", "status": run_result["status"]})
         if run_result["status"] != "pass":

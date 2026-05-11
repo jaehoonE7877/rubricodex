@@ -716,6 +716,33 @@ class RubricodexContractTests(unittest.TestCase):
             {issue["path"] for issue in stale_status["issues"]},
         )
 
+    def test_orchestrate_status_revalidates_source_app_artifacts(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+        orchestrate_run(self.root, "example-v0.1", parallel=2)
+
+        session = sample_app_session()
+        session["raw_transcript_stored"] = True
+        session["raw_transcript"] = "do not store this"
+        write_json(app_session_path(self.root, "example-session"), session)
+        session_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(session_status["status"], "fail")
+        self.assertIn("$.raw_transcript", {issue["path"] for issue in session_status["issues"]})
+
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        cards = sample_app_cards()
+        cards["raw_transcript"] = "do not store this"
+        write_json(app_cards_path(self.root, "example-session"), cards)
+        cards_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(cards_status["status"], "fail")
+        self.assertIn("$.raw_transcript", {issue["path"] for issue in cards_status["issues"]})
+
     def test_orchestrate_run_fails_when_app_collection_is_invalid(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -757,6 +784,24 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["run_status"]["status"], "fail")
         self.assertIn({"name": "probe_run", "status": "fail"}, result["steps"])
+
+    def test_orchestrate_run_rerun_recomputes_manifest_summary(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+
+        failed = orchestrate_run(self.root, "example-v0.1", execute=True, codex_bin="false")
+        rerun = orchestrate_run(self.root, "example-v0.1")
+        manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
+
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual(rerun["status"], "pass")
+        self.assertEqual(manifest["execution_mode"], "dry_run")
+        self.assertEqual(
+            manifest["result_summary"],
+            "Prepared Codex CLI local runner handoff without executing external commands.",
+        )
 
     def test_cli_app_and_orchestrate_commands(self) -> None:
         matrix = self.write_default_contract()
