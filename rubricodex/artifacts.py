@@ -1656,6 +1656,8 @@ def collect_app_artifacts(root: Path | str, run_id: str, mode: str = DEFAULT_MOD
     session, session_file = _find_app_session_for_run(root_path, run_id)
     assert_valid(validate_app_session(session))
     cards_file = app_cards_path(root_path, str(session["session_id"]))
+    if not cards_file.is_file():
+        raise ArtifactError([ValidationIssue("$.cards_path", f"cards.json is missing at {cards_file}")])
     cards = read_json(cards_file)
     assert_valid(validate_app_cards(cards, session))
 
@@ -1703,17 +1705,24 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
         "scorecard": f".rubricodex/runs/{run_id}/scorecard.json",
         "report": f".rubricodex/runs/{run_id}/report.md",
         "retune_goal": f".rubricodex/runs/{run_id}/retune_goal.md",
+        "orchestrator": f".rubricodex/runs/{run_id}/orchestrator.json",
     }
     missing = [name for name, path in required.items() if not _artifact_exists(root_path, path)]
     decision = None
+    orchestration_status = None
     if "scorecard" not in missing:
         scorecard = read_json(run_dir(root_path, run_id) / "scorecard.json")
         assert_valid(validate_scorecard(scorecard))
         decision = scorecard.get("decision")
+    if "orchestrator" not in missing:
+        orchestration = read_json(orchestrator_path(root_path, run_id))
+        assert_valid(validate_orchestrator(orchestration))
+        orchestration_status = orchestration.get("status")
     return {
-        "status": "complete" if not missing else "incomplete",
+        "status": "fail" if orchestration_status == "fail" else "complete" if not missing else "incomplete",
         "run_id": run_id,
         "decision": decision,
+        "orchestration_status": orchestration_status,
         "missing": missing,
         "report_path": required["report"],
         "retune_goal_path": required["retune_goal"],

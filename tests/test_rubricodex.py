@@ -612,6 +612,14 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(collection["card_count"], 4)
         self.assertEqual(validate_app_collection(collection), [])
 
+    def test_app_collect_reports_missing_cards_as_artifact_error(self) -> None:
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+
+        with self.assertRaises(ArtifactError) as context:
+            collect_app_artifacts(self.root, "example-v0.1")
+
+        self.assertIn("cards.json is missing", str(context.exception))
+
     def test_orchestrate_run_and_status_complete_shared_flow(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -643,6 +651,7 @@ class RubricodexContractTests(unittest.TestCase):
         result = orchestrate_run(self.root, "example-v0.1", parallel=2)
 
         self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["run_status"]["status"], "fail")
         self.assertEqual(result["steps"][-1], {"name": "app_collect", "status": "fail"})
 
     def test_orchestrate_run_fails_when_probe_execution_fails(self) -> None:
@@ -668,6 +677,7 @@ class RubricodexContractTests(unittest.TestCase):
         result = orchestrate_run(self.root, "example-v0.1", execute=True, codex_bin=str(fake_codex))
 
         self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["run_status"]["status"], "fail")
         self.assertIn({"name": "probe_run", "status": "fail"}, result["steps"])
 
     def test_cli_app_and_orchestrate_commands(self) -> None:
