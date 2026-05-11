@@ -8,10 +8,12 @@ from io import StringIO
 from pathlib import Path
 
 from rubricodex.artifacts import (
+    ArtifactError,
     GOAL_HEADINGS,
     BRIEF_TYPE,
     EVIDENCE_TYPE,
     MATRIX_TYPE,
+    RUN_MANIFEST_TYPE,
     SCHEMA_VERSION,
     SCORECARD_TYPE,
     compile_goal,
@@ -22,10 +24,13 @@ from rubricodex.artifacts import (
     lint_goal_file,
     matrix_path,
     read_json,
+    run_local,
     run_dir,
+    run_manifest_path,
     validate_brief,
     validate_evidence,
     validate_matrix,
+    validate_run_manifest,
     verify_matrix_lock,
     validate_scorecard,
     write_json,
@@ -376,6 +381,116 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["evidence_items"][0]["criterion_id"] = "C-999"
         self.assertTrue(validate_evidence(evidence, matrix))
 
+    def test_run_local_requires_prompt_lint_pass(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+
+        with self.assertRaises(ArtifactError) as context:
+            run_local(self.root, "example-v0.1")
+
+        self.assertIn("prompt-lint.json", str(context.exception))
+
+    def test_run_local_dry_run_writes_manifest_without_raw_output(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = run_local(
+            self.root,
+            "example-v0.1",
+            result_summary="Prepared Codex CLI handoff without execution.",
+            verification_commands=["python3 -m unittest discover -s tests"],
+            changed_files=["rubricodex/artifacts.py", "rubricodex/cli.py"],
+        )
+
+        manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(manifest["artifact_type"], RUN_MANIFEST_TYPE)
+        self.assertEqual(manifest["execution_mode"], "dry_run")
+        self.assertFalse(manifest["raw_output_stored"])
+        self.assertEqual(validate_run_manifest(manifest), [])
+        self.assertNotIn("stdout", str(manifest).lower())
+        self.assertNotIn("stderr", str(manifest).lower())
+
+    def test_run_local_creates_missing_evidence_when_absent(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        run_local(self.root, "example-v0.1")
+
+        evidence = read_json(run_dir(self.root, "example-v0.1") / "evidence.json")
+        self.assertEqual(validate_evidence(evidence, matrix), [])
+        self.assertEqual(
+            {item["status"] for item in evidence["evidence_items"]},
+            {"missing_evidence"},
+        )
+        self.assertIn(
+            ".rubricodex/runs/example-v0.1/run-manifest.json",
+            evidence["runner_manifest_path"],
+        )
+
+    def test_run_local_execute_reports_nonzero_exit_without_raw_output(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = run_local(self.root, "example-v0.1", execute=True, codex_bin="false")
+
+        manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(manifest["command_results"][0]["exit_code"], 1)
+        self.assertEqual(validate_run_manifest(manifest), [])
+        self.assertNotIn("stdout", str(manifest).lower())
+        self.assertNotIn("stderr", str(manifest).lower())
+
+    def test_cli_run_local_accepts_summary_and_writes_manifest(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "run",
+                    "local",
+                    "--run-id",
+                    "example-v0.1",
+                    "--summary",
+                    "Dry-run handoff verified.",
+                    "--verification-command",
+                    "python3 -m unittest discover -s tests",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        output = stdout.getvalue()
+        self.assertIn("run-manifest.json", output)
+        manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
+        self.assertEqual(manifest["result_summary"], "Dry-run handoff verified.")
+
+    def test_run_manifest_rejects_raw_output_fields(self) -> None:
+        manifest = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": RUN_MANIFEST_TYPE,
+            "rubricodex_version": "0.1.0",
+            "created_at": "2026-05-11T00:00:00Z",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "executor": "codex-cli-local",
+            "execution_mode": "dry_run",
+            "raw_output_stored": False,
+            "result_summary": "Prepared handoff.",
+            "command_results": [
+                {"command": "codex exec", "exit_code": None, "stdout": "raw"},
+            ],
+            "changed_files": [],
+            "verification_commands": [],
+        }
+        self.assertTrue(validate_run_manifest(manifest))
+
     def test_scorecard_pass_all_pass(self) -> None:
         matrix = self.write_default_contract()
         write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
@@ -457,6 +572,10 @@ class RubricodexContractTests(unittest.TestCase):
         compile_goal(fixture, "example-v0.1")
         lint = lint_goal_file(fixture, "example-v0.1")
         self.assertEqual(lint["status"], "pass")
+        run_result = run_local(fixture, "example-v0.1")
+        self.assertEqual(run_result["status"], "pass")
+        manifest = read_json(run_manifest_path(fixture, "example-v0.1"))
+        self.assertEqual(validate_run_manifest(manifest), [])
         scorecard = compute_scorecard(fixture, "example-v0.1")
         self.assertIn(scorecard["decision"], {"pass", "pass_with_warnings"})
         paths = write_report(fixture, "example-v0.1")

@@ -1,4 +1,4 @@
-"""Rubricodex v0.1 local harness."""
+"""Rubricodex local harness."""
 
 __all__ = ["__version__"]
 

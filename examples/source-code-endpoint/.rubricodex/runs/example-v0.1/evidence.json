@@ -66,5 +66,7 @@
   "raw_output_stored": false,
   "rubricodex_version": "0.1.0",
   "run_id": "example-v0.1",
+  "runner_manifest_path": ".rubricodex/runs/example-v0.1/run-manifest.json",
+  "runner_summary": "Dry-run Codex CLI handoff verified for source-code-endpoint fixture.",
   "schema_version": "rubricodex.v0.1"
 }
