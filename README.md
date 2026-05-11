@@ -8,23 +8,22 @@ Rubricodex는 Codex app에서 `@Rubricodex`를 멘션해 모호한 구현 요청
 
 | Codex 작업에서 자주 생기는 문제 | Rubricodex가 고정하는 것 |
 | --- | --- |
-| “완료”의 의미가 흐림 | target |
+| “완료”의 의미가 흐림 | intent brief |
 | 성공 기준이 중간에 바뀜 | evaluation matrix |
 | 검증 근거가 부족함 | evidence |
-| 실패 후 다음 지시가 장황함 | retune task |
+| 실패 후 다음 지시가 장황함 | retune instruction |
 
 ## Basic Flow
 
 ```mermaid
 flowchart LR
-  A["@Rubricodex goal"] --> B["Mode 선택"]
-  B --> C["Target + Matrix"]
-  C --> D["Taskpack"]
-  D --> E["Codex 실행"]
-  E --> F["Review / Probe"]
-  F --> G{"Pass?"}
-  G -->|Yes| H["Report"]
-  G -->|No| I["Retune"]
+  A["@Rubricodex goal"] --> B["Intent brief"]
+  B --> C["Evaluation matrix"]
+  C --> D["Taskpack goal.md"]
+  D --> E["Codex implementation"]
+  E --> F["Evidence"]
+  F --> G["Scorecard + Report"]
+  G --> H["Retune goal if needed"]
 ```
 
 ## Modes
@@ -37,17 +36,21 @@ flowchart LR
 | `strict` | 결제, 권한, 개인정보, migration, 데이터 무결성 |
 | `audit` | 구현 없이 현재 diff나 결과 검토 |
 
-## Example
+## Local Usage
 
-```text
-@Rubricodex quick 로그인 후 redirect query가 있으면 해당 경로로 이동하게 고쳐줘.
+```bash
+python3 -m rubricodex.cli init
+python3 -m rubricodex.cli goal compile --run-id example-v0.1
+python3 -m rubricodex.cli prompt lint --run-id example-v0.1
+python3 -m rubricodex.cli score compute --run-id example-v0.1
+python3 -m rubricodex.cli report --run-id example-v0.1
 ```
 
-Rubricodex는 필요한 경우에만 짧게 묻고, 바로 실행 가능한 target/matrix/taskpack으로 압축합니다.
+Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. v0.1은 skill + local CLI 계약이며 Codex CLI 프로세스를 직접 실행하지 않습니다.
 
 ## v0.1 Fixture
 
-첫 v0.1 proof fixture는 [examples/source-code-endpoint](examples/source-code-endpoint)에 있습니다. 실제 app plugin이나 CLI 자동화 없이도 `@Rubricodex` mention에서 target, matrix, taskpack, scorecard까지 이어지는 수동 품질 루프를 검증합니다.
+첫 v0.1 fixture는 [examples/source-code-endpoint](examples/source-code-endpoint)에 있습니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
 
 ## Product SSoT
 

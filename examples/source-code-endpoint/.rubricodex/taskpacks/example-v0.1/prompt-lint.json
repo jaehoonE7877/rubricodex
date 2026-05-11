@@ -1,0 +1,10 @@
+{
+  "artifact_type": "rubricodex.prompt_lint",
+  "created_at": "2026-05-11T07:58:52Z",
+  "issues": [],
+  "mode": "standard",
+  "rubricodex_version": "0.1.0",
+  "run_id": "example-v0.1",
+  "schema_version": "rubricodex.v0.1",
+  "status": "pass"
+}

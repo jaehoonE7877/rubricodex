@@ -1,0 +1,14 @@
+{
+  "artifact_type": "rubricodex.config",
+  "canonical_artifacts": {
+    "evaluation_matrix": ".rubricodex/matrix/evaluation-matrix.json",
+    "intent_brief": ".rubricodex/intent/brief.json",
+    "runs": ".rubricodex/runs/<run_id>/",
+    "taskpacks": ".rubricodex/taskpacks/<run_id>/"
+  },
+  "default_executor": "codex-cli-goal",
+  "default_mode": "standard",
+  "raw_storage_policy": "never_store_raw_transcripts_logs_or_unredacted_command_output",
+  "rubricodex_version": "0.1.0",
+  "schema_version": "rubricodex.v0.1"
+}
