@@ -79,11 +79,13 @@ STRICT_KEYWORDS = {
     "payment",
     "permission",
     "privacy",
+    "remove",
     "security",
     "결제",
     "권한",
     "개인정보",
     "마이그레이션",
+    "제거",
     "삭제",
     "보안",
     "인증",
@@ -113,10 +115,12 @@ CHANGE_INTENT_KEYWORDS = {
     "build",
     "change",
     "create",
+    "delete",
     "fix",
     "implement",
     "modify",
     "refactor",
+    "remove",
     "ship",
     "update",
     "개선",
@@ -125,7 +129,9 @@ CHANGE_INTENT_KEYWORDS = {
     "만들",
     "반영",
     "변경",
+    "삭제",
     "수정",
+    "제거",
     "추가",
 }
 
@@ -674,6 +680,8 @@ def draft_harness(
     active_mode = classify_mode(goal_text, mode)
     if active_mode not in MODE_CRITERIA_RANGE:
         raise ArtifactError([ValidationIssue("$.mode", f"mode must be auto or one of {', '.join(MODE_CRITERIA_RANGE)}")])
+    if not _is_safe_path_segment(run_id):
+        raise ArtifactError([ValidationIssue("$.run_id", "run_id must be a single path-safe segment")])
 
     root_path = Path(root)
     init_project(root_path, mode=active_mode, executor=executor)

@@ -352,6 +352,13 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertIn("goal must be non-empty", str(context.exception))
 
+    def test_plan_draft_rejects_unsafe_run_id(self) -> None:
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(self.root, "../escape", "관리자 dashboard page를 만들고 test evidence를 남겨줘.")
+
+        self.assertIn("$.run_id", {issue.path for issue in context.exception.issues})
+        self.assertFalse((self.root / ".rubricodex" / "escape" / "goal.md").exists())
+
     def test_request_readiness_records_assumptions_without_raw_fields(self) -> None:
         readiness = assess_request_readiness("대시보드를 만들어줘", "standard")
 
@@ -365,6 +372,9 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("권한 migration을 안전하게 수정", "auto"), "strict")
         self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
         self.assertEqual(classify_mode("review and fix auth bug", "auto"), "strict")
+        self.assertEqual(classify_mode("review and delete old auth route", "auto"), "strict")
+        self.assertEqual(classify_mode("review and remove old route", "auto"), "strict")
+        self.assertEqual(classify_mode("보안 삭제 리뷰", "auto"), "strict")
         self.assertEqual(classify_mode("리뷰 반영해서 작은 버그 수정", "auto"), "quick")
         self.assertEqual(classify_mode("관리자 대시보드를 만들어줘", "auto"), "standard")
 
