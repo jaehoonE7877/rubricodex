@@ -22,9 +22,9 @@ body:
       label: 재현 절차
       description: 가능하면 명령어와 입력 artifact까지 포함해 최소 재현 절차를 적어주세요.
       placeholder: |
-        1. `rubricodex target validate`
+        1. `rubricodex intent validate`
         2. `rubricodex matrix validate`
-        3. ...
+        3. `rubricodex matrix lock --run-id example`
       render: bash
     validations:
       required: true
