@@ -1660,10 +1660,15 @@ def _validate_app_card_shared_refs(
     report_ref: str,
     retune_ref: str,
 ) -> list[ValidationIssue]:
+    card_items = cards.get("cards")
+    if not isinstance(card_items, list):
+        return []
     card_refs = {
-        card["card_type"]: set(card.get("artifact_refs", []))
-        for card in cards["cards"]
-        if isinstance(card, dict) and isinstance(card.get("artifact_refs"), list)
+        card["card_type"]: set(card["artifact_refs"])
+        for card in card_items
+        if isinstance(card, dict)
+        and isinstance(card.get("card_type"), str)
+        and isinstance(card.get("artifact_refs"), list)
     }
     issues: list[ValidationIssue] = []
     if report_ref not in card_refs.get("report", set()):

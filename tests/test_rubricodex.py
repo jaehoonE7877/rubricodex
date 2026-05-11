@@ -764,6 +764,33 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("$.cards.report.artifact_refs", issue_paths)
         self.assertIn("$.cards.retune.artifact_refs", issue_paths)
 
+    def test_orchestrate_status_reports_malformed_current_cards(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+        orchestrate_run(self.root, "example-v0.1", parallel=2)
+
+        cards = sample_app_cards()
+        del cards["cards"][0]["card_type"]
+        write_json(app_cards_path(self.root, "example-session"), cards)
+
+        missing_card_type_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(missing_card_type_status["status"], "fail")
+        self.assertIn("$.cards[0].card_type", {issue["path"] for issue in missing_card_type_status["issues"]})
+
+        cards = sample_app_cards()
+        del cards["cards"]
+        write_json(app_cards_path(self.root, "example-session"), cards)
+
+        missing_cards_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(missing_cards_status["status"], "fail")
+        self.assertIn("$.cards", {issue["path"] for issue in missing_cards_status["issues"]})
+
     def test_orchestrate_run_fails_when_app_collection_is_invalid(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
