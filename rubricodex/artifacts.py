@@ -594,12 +594,13 @@ def validate_app_session(data: dict[str, Any]) -> list[ValidationIssue]:
     for key in ("session_id", "run_id", "entrypoint", "mention", "mode", "user_goal_summary"):
         if not isinstance(data.get(key), str) or not data[key].strip():
             issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
-    if (
-        isinstance(data.get("session_id"), str)
-        and data["session_id"].strip()
-        and not _is_safe_path_segment(data["session_id"])
-    ):
-        issues.append(ValidationIssue("$.session_id", "session_id must be a single path-safe segment"))
+    for key in ("session_id", "run_id"):
+        if (
+            isinstance(data.get(key), str)
+            and data[key].strip()
+            and not _is_safe_path_segment(data[key])
+        ):
+            issues.append(ValidationIssue(f"$.{key}", f"{key} must be a single path-safe segment"))
     selected_context_refs = data.get("selected_context_refs")
     if not isinstance(selected_context_refs, list):
         issues.append(ValidationIssue("$.selected_context_refs", "selected_context_refs must be a list"))
@@ -621,12 +622,13 @@ def validate_app_cards(data: dict[str, Any], session: dict[str, Any] | None = No
     for key in ("session_id", "run_id"):
         if not isinstance(data.get(key), str) or not data[key].strip():
             issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
-    if (
-        isinstance(data.get("session_id"), str)
-        and data["session_id"].strip()
-        and not _is_safe_path_segment(data["session_id"])
-    ):
-        issues.append(ValidationIssue("$.session_id", "session_id must be a single path-safe segment"))
+    for key in ("session_id", "run_id"):
+        if (
+            isinstance(data.get(key), str)
+            and data[key].strip()
+            and not _is_safe_path_segment(data[key])
+        ):
+            issues.append(ValidationIssue(f"$.{key}", f"{key} must be a single path-safe segment"))
     if session:
         if data.get("session_id") != session.get("session_id"):
             issues.append(ValidationIssue("$.session_id", "cards session_id must match app-session.json"))

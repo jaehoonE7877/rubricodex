@@ -584,18 +584,22 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(validate_app_session(session))
         self.assertTrue(validate_app_cards(cards))
 
-    def test_app_session_and_cards_reject_path_segment_session_id(self) -> None:
+    def test_app_session_and_cards_reject_path_segment_ids(self) -> None:
         for unsafe in ("nested/session", "../session", "/tmp/session", "nested\\session"):
             session = sample_app_session()
             cards = sample_app_cards()
             session["session_id"] = unsafe
+            session["run_id"] = unsafe
             cards["session_id"] = unsafe
+            cards["run_id"] = unsafe
 
             session_issues = validate_app_session(session)
             cards_issues = validate_app_cards(cards)
 
             self.assertIn("$.session_id", {issue.path for issue in session_issues})
+            self.assertIn("$.run_id", {issue.path for issue in session_issues})
             self.assertIn("$.session_id", {issue.path for issue in cards_issues})
+            self.assertIn("$.run_id", {issue.path for issue in cards_issues})
 
     def test_app_session_import_writes_shared_run_reference(self) -> None:
         source = self.root / "incoming" / "app-session.json"
