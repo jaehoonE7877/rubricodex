@@ -1,0 +1,367 @@
+from __future__ import annotations
+
+import shutil
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from io import StringIO
+from pathlib import Path
+
+from rubricodex.artifacts import (
+    GOAL_HEADINGS,
+    BRIEF_TYPE,
+    EVIDENCE_TYPE,
+    MATRIX_TYPE,
+    SCHEMA_VERSION,
+    SCORECARD_TYPE,
+    compile_goal,
+    compute_scorecard,
+    init_project,
+    intent_path,
+    lint_goal_file,
+    matrix_path,
+    read_json,
+    run_dir,
+    validate_brief,
+    validate_evidence,
+    validate_matrix,
+    validate_scorecard,
+    write_json,
+    write_report,
+)
+from rubricodex.cli import main as cli_main
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def sample_brief(mode: str = "standard") -> dict:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": BRIEF_TYPE,
+        "rubricodex_version": "0.1.0",
+        "created_at": "2026-05-11T00:00:00Z",
+        "mode": mode,
+        "task_kind": "source-code-endpoint",
+        "blocks": {
+            "purpose": "Add a POST /api/widgets endpoint.",
+            "desired_outcome": "Valid widget input returns a 201 response with a persisted widget object.",
+            "deliverable_shape": "Small Express endpoint plus node:test coverage.",
+            "reference_context": ["examples/source-code-endpoint/src/server.js", "examples/source-code-endpoint/test/server.test.js"],
+            "scope_in": ["POST /api/widgets", "name validation", "happy path and invalid input tests"],
+            "scope_out": ["database persistence", "auth", "frontend UI"],
+            "working_rules": ["Keep implementation in memory.", "Do not add runtime dependencies."],
+            "evaluation_basis": ["Endpoint contract", "Input validation", "Test evidence"],
+            "done_when": ["All hard gates pass.", "Summarized evidence is available."],
+        },
+    }
+
+
+def criterion(index: int, hard_gate: bool = False) -> dict:
+    return {
+        "id": f"C-{index:02d}",
+        "name": {
+            1: "Endpoint contract",
+            2: "Input validation",
+            3: "Data integrity",
+            4: "Test coverage",
+            5: "Maintainability",
+            6: "Report quality",
+            7: "Retune quality",
+            8: "Policy compliance",
+        }.get(index, f"Criterion {index}"),
+        "claim": f"Criterion {index} is satisfied.",
+        "check_question": f"Does criterion {index} have summarized evidence?",
+        "evidence_required": [f"Evidence summary for C-{index:02d}"],
+        "hard_gate": hard_gate,
+        "levels": {
+            "pass": "Evidence proves the criterion.",
+            "partial": "Evidence is present but incomplete.",
+            "fail": "Evidence disproves the criterion.",
+        },
+        "retune_hint": f"Fix C-{index:02d} without changing passed criteria.",
+    }
+
+
+def sample_matrix(mode: str = "standard", count: int = 5, hard_ids: set[int] | None = None) -> dict:
+    hard_ids = hard_ids if hard_ids is not None else {1, 2}
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": MATRIX_TYPE,
+        "rubricodex_version": "0.1.0",
+        "created_at": "2026-05-11T00:00:00Z",
+        "mode": mode,
+        "method": "gqe-r-lite",
+        "criteria": [criterion(index, hard_gate=index in hard_ids) for index in range(1, count + 1)],
+    }
+
+
+def sample_evidence(matrix: dict, statuses: dict[str, str] | None = None, scope_out_drift: str | None = None) -> dict:
+    statuses = statuses or {}
+    items = []
+    for item in matrix["criteria"]:
+        status = statuses.get(item["id"], "pass")
+        if status == "omit":
+            continue
+        evidence_item = {
+            "id": f"E-{item['id']}",
+            "criterion_id": item["id"],
+            "kind": "test",
+            "summary": f"{item['id']} has summarized verification evidence.",
+            "artifact_refs": ["python -m unittest"],
+            "status": status,
+            "confidence": 0.9,
+        }
+        if scope_out_drift == item["id"]:
+            evidence_item["scope_out_drift"] = True
+        items.append(evidence_item)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact_type": EVIDENCE_TYPE,
+        "rubricodex_version": "0.1.0",
+        "created_at": "2026-05-11T00:00:00Z",
+        "mode": matrix["mode"],
+        "run_id": "example-v0.1",
+        "executor": "codex-cli-goal",
+        "raw_output_stored": False,
+        "evidence_items": items,
+    }
+
+
+class RubricodexContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write_default_contract(self, matrix: dict | None = None, evidence: dict | None = None) -> dict:
+        write_json(intent_path(self.root), sample_brief())
+        matrix = matrix or sample_matrix()
+        write_json(matrix_path(self.root), matrix)
+        if evidence is not None:
+            write_json(run_dir(self.root, "example-v0.1") / "evidence.json", evidence)
+        return matrix
+
+    def test_init_creates_minimal_tree(self) -> None:
+        init_project(self.root)
+        base = self.root / ".rubricodex"
+        for child in ("intent", "matrix", "taskpacks", "runs"):
+            self.assertTrue((base / child).is_dir())
+
+    def test_init_writes_config_and_plugin_skill(self) -> None:
+        init_project(self.root)
+        self.assertTrue((self.root / ".rubricodex" / "config.json").is_file())
+        self.assertTrue((REPO_ROOT / "plugins/rubricodex/.codex-plugin/plugin.json").is_file())
+        self.assertTrue((REPO_ROOT / "plugins/rubricodex/skills/rubricodex/SKILL.md").is_file())
+
+    def test_cli_accepts_root_after_subcommand(self) -> None:
+        with redirect_stdout(StringIO()):
+            exit_code = cli_main(["init", "--root", str(self.root)])
+        self.assertEqual(exit_code, 0)
+        self.assertTrue((self.root / ".rubricodex" / "config.json").is_file())
+
+    def test_plugin_has_only_manifest_and_skill_surface(self) -> None:
+        plugin_root = REPO_ROOT / "plugins/rubricodex"
+        self.assertTrue((plugin_root / ".codex-plugin/plugin.json").is_file())
+        self.assertTrue((plugin_root / "skills/rubricodex/SKILL.md").is_file())
+        self.assertFalse((plugin_root / ".mcp.json").exists())
+        self.assertFalse((plugin_root / ".app.json").exists())
+        self.assertFalse((plugin_root / "hooks.json").exists())
+        self.assertFalse((plugin_root / "hooks").exists())
+
+    def test_brief_valid_passes(self) -> None:
+        self.assertEqual(validate_brief(sample_brief()), [])
+
+    def test_brief_missing_any_of_9_blocks_fails(self) -> None:
+        for block in sample_brief()["blocks"].keys():
+            with self.subTest(block=block):
+                brief = sample_brief()
+                del brief["blocks"][block]
+                self.assertTrue(validate_brief(brief))
+
+    def test_brief_empty_scope_in_fails_standard(self) -> None:
+        brief = sample_brief()
+        brief["blocks"]["scope_in"] = []
+        self.assertTrue(validate_brief(brief, "standard"))
+
+    def test_brief_raw_transcript_key_fails(self) -> None:
+        brief = sample_brief()
+        brief["raw_transcript"] = "do not store this"
+        self.assertTrue(validate_brief(brief))
+
+    def test_matrix_valid_passes(self) -> None:
+        self.assertEqual(validate_matrix(sample_matrix()), [])
+
+    def test_matrix_duplicate_criterion_id_fails(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][1]["id"] = matrix["criteria"][0]["id"]
+        self.assertTrue(validate_matrix(matrix))
+
+    def test_matrix_missing_evidence_required_fails(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][0]["evidence_required"] = []
+        self.assertTrue(validate_matrix(matrix))
+
+    def test_matrix_missing_hard_gate_standard_fails(self) -> None:
+        matrix = sample_matrix(hard_ids=set())
+        self.assertTrue(validate_matrix(matrix, "standard"))
+
+    def test_matrix_criteria_count_by_mode(self) -> None:
+        self.assertEqual(validate_matrix(sample_matrix(mode="micro", count=1, hard_ids={1}), "micro"), [])
+        self.assertTrue(validate_matrix(sample_matrix(mode="micro", count=3, hard_ids={1}), "micro"))
+        self.assertEqual(validate_matrix(sample_matrix(mode="strict", count=6, hard_ids={1}), "strict"), [])
+        self.assertTrue(validate_matrix(sample_matrix(mode="strict", count=5, hard_ids={1}), "strict"))
+
+    def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
+        self.write_default_contract()
+        paths = compile_goal(self.root, "example-v0.1")
+        for path in paths.values():
+            self.assertTrue(path.is_file())
+        self.assertIn("brief_sha256", read_json(paths["lock"]))
+
+    def test_goal_compile_does_not_use_target_json(self) -> None:
+        self.write_default_contract()
+        write_json(self.root / ".rubricodex" / "target.json", {"invalid": True})
+        paths = compile_goal(self.root, "example-v0.1")
+        adapter = read_json(paths["adapter_input"])
+        self.assertNotIn("target.json", str(adapter))
+
+    def test_goal_md_contains_required_sections(self) -> None:
+        self.write_default_contract()
+        paths = compile_goal(self.root, "example-v0.1")
+        text = paths["goal"].read_text(encoding="utf-8")
+        for heading in GOAL_HEADINGS:
+            self.assertIn(f"## {heading}", text)
+
+    def test_prompt_lint_missing_include_or_exclude_fails(self) -> None:
+        self.write_default_contract()
+        paths = compile_goal(self.root, "example-v0.1")
+        text = paths["goal"].read_text(encoding="utf-8").replace("## Include\n", "## Missing include\n")
+        paths["goal"].write_text(text, encoding="utf-8")
+        result = lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+
+    def test_prompt_lint_missing_evaluation_fails(self) -> None:
+        self.write_default_contract()
+        paths = compile_goal(self.root, "example-v0.1")
+        text = paths["goal"].read_text(encoding="utf-8").replace("## Evaluation\n", "## Missing evaluation\n")
+        paths["goal"].write_text(text, encoding="utf-8")
+        result = lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+
+    def test_prompt_lint_missing_completion_rule_fails_standard(self) -> None:
+        self.write_default_contract()
+        paths = compile_goal(self.root, "example-v0.1")
+        text = paths["goal"].read_text(encoding="utf-8").replace("## Completion rule\n", "## Missing completion\n")
+        paths["goal"].write_text(text, encoding="utf-8")
+        result = lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+
+    def test_evidence_valid_passes(self) -> None:
+        matrix = sample_matrix()
+        self.assertEqual(validate_evidence(sample_evidence(matrix), matrix), [])
+
+    def test_evidence_raw_output_stored_true_fails(self) -> None:
+        matrix = sample_matrix()
+        evidence = sample_evidence(matrix)
+        evidence["raw_output_stored"] = True
+        self.assertTrue(validate_evidence(evidence, matrix))
+
+    def test_evidence_unknown_criterion_id_fails(self) -> None:
+        matrix = sample_matrix()
+        evidence = sample_evidence(matrix)
+        evidence["evidence_items"][0]["criterion_id"] = "C-999"
+        self.assertTrue(validate_evidence(evidence, matrix))
+
+    def test_scorecard_pass_all_pass(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        self.assertEqual(scorecard["decision"], "pass")
+        self.assertEqual(scorecard["counts"]["pass"], 5)
+
+    def test_scorecard_pass_with_warnings_nonhard_partial(self) -> None:
+        matrix = self.write_default_contract()
+        evidence = sample_evidence(matrix, {"C-05": "partial"})
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", evidence)
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        self.assertEqual(scorecard["decision"], "pass_with_warnings")
+
+    def test_scorecard_needs_retune_missing_hard_gate_evidence(self) -> None:
+        matrix = self.write_default_contract()
+        evidence = sample_evidence(matrix, {"C-01": "omit"})
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", evidence)
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        self.assertEqual(scorecard["decision"], "needs_retune")
+
+    def test_scorecard_fail_scope_out_drift(self) -> None:
+        matrix = self.write_default_contract()
+        evidence = sample_evidence(matrix, {"C-05": "fail"}, scope_out_drift="C-05")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", evidence)
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        self.assertEqual(scorecard["decision"], "fail")
+
+    def test_scorecard_rejects_total_score_in_v01(self) -> None:
+        scorecard = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": SCORECARD_TYPE,
+            "rubricodex_version": "0.1.0",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "created_at": "2026-05-11T00:00:00Z",
+            "scoring_model": "counts-v0.1",
+            "decision": "pass",
+            "counts": {"pass": 1, "partial": 0, "missing_evidence": 0, "fail": 0},
+            "results": [],
+            "total_score": 1.0,
+        }
+        self.assertTrue(validate_scorecard(scorecard))
+
+    def test_report_writes_required_headings(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        paths = write_report(self.root, "example-v0.1")
+        text = paths["report"].read_text(encoding="utf-8")
+        for heading in ("# Rubricodex Report", "## Summary", "## Criteria", "## Next action"):
+            self.assertIn(heading, text)
+
+    def test_retune_goal_only_mentions_failed_or_partial_criteria(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        paths = write_report(self.root, "example-v0.1")
+        text = paths["retune"].read_text(encoding="utf-8")
+        self.assertIn("C-05", text)
+        self.assertNotIn("C-01", text)
+
+    def test_legacy_fixture_target_matrix_harness_plan_not_canonical(self) -> None:
+        fixture = REPO_ROOT / "examples/source-code-endpoint/.rubricodex"
+        self.assertFalse((fixture / "target.json").exists())
+        self.assertFalse((fixture / "matrix.json").exists())
+        self.assertFalse((fixture / "harness-plan.json").exists())
+
+    def test_source_code_endpoint_fixture_full_flow(self) -> None:
+        source = REPO_ROOT / "examples/source-code-endpoint"
+        fixture = self.root / "fixture"
+        shutil.copytree(source, fixture)
+        brief = read_json(intent_path(fixture))
+        matrix = read_json(matrix_path(fixture))
+        evidence = read_json(run_dir(fixture, "example-v0.1") / "evidence.json")
+        self.assertEqual(validate_brief(brief), [])
+        self.assertEqual(validate_matrix(matrix), [])
+        self.assertEqual(validate_evidence(evidence, matrix), [])
+        compile_goal(fixture, "example-v0.1")
+        lint = lint_goal_file(fixture, "example-v0.1")
+        self.assertEqual(lint["status"], "pass")
+        scorecard = compute_scorecard(fixture, "example-v0.1")
+        self.assertIn(scorecard["decision"], {"pass", "pass_with_warnings"})
+        paths = write_report(fixture, "example-v0.1")
+        self.assertTrue(paths["report"].is_file())
+        self.assertTrue(paths["retune"].is_file())
+
+
+if __name__ == "__main__":
+    unittest.main()
