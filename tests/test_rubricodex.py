@@ -402,6 +402,8 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
         self.assertEqual(classify_mode("Implement authentication middleware with tests", "auto"), "strict")
         self.assertEqual(classify_mode("review and fix auth bug", "auto"), "strict")
+        self.assertEqual(classify_mode("Review and improve authentication middleware with tests", "auto"), "strict")
+        self.assertEqual(classify_mode("Review and improve dashboard UI with tests", "auto"), "standard")
         self.assertEqual(classify_mode("review and delete old auth route", "auto"), "strict")
         self.assertEqual(classify_mode("review and remove old route", "auto"), "strict")
         self.assertEqual(classify_mode("보안 삭제 리뷰", "auto"), "strict")

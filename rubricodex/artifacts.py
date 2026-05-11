@@ -118,6 +118,8 @@ CHANGE_INTENT_KEYWORDS = {
     "create",
     "delete",
     "fix",
+    "harden",
+    "improve",
     "implement",
     "modify",
     "refactor",
