@@ -362,6 +362,18 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertFalse((self.root / ".rubricodex" / "escape" / "goal.md").exists())
         self.assertFalse((self.root / ".rubricodex" / "taskpacks" / "goal.md").exists())
 
+    def test_plan_draft_rejects_existing_locked_contract(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(self.root, "example-v1.0", "관리자 dashboard page를 만들고 test evidence를 남겨줘.")
+
+        self.assertIn("$.run_id", {issue.path for issue in context.exception.issues})
+        self.assertIn("example-v0.1", str(context.exception))
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "pass")
+        self.assertFalse((self.root / ".rubricodex" / "taskpacks" / "example-v1.0").exists())
+
     def test_request_readiness_records_assumptions_without_raw_fields(self) -> None:
         readiness = assess_request_readiness("대시보드를 만들어줘", "standard")
 

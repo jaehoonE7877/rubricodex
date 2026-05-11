@@ -14,6 +14,7 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - Do not store raw transcripts, raw task logs, or unredacted command output in repo artifacts or Notion.
 - The local runner records only a manifest and summarized evidence. Direct Codex CLI execution is opt-in via `rubricodex run local --execute`.
 - App-first artifacts store only summarized session state, decisions, card refs, and shared report/retune links.
+- `rubricodex plan draft` is for a fresh or unlocked root; it refuses to overwrite an existing locked taskpack contract.
 
 ## Flow
 

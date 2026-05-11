@@ -666,6 +666,13 @@ def draft_matrix(goal: str, mode: str) -> dict[str, Any]:
     return matrix
 
 
+def locked_taskpack_run_ids(root: Path | str) -> list[str]:
+    taskpacks = artifact_root(root) / "taskpacks"
+    if not taskpacks.exists():
+        return []
+    return sorted(path.parent.name for path in taskpacks.glob("*/goal.lock.json"))
+
+
 def draft_harness(
     root: Path | str,
     run_id: str,
@@ -684,6 +691,16 @@ def draft_harness(
         raise ArtifactError([ValidationIssue("$.run_id", "run_id must be a single path-safe segment")])
 
     root_path = Path(root)
+    locked_run_ids = locked_taskpack_run_ids(root_path)
+    if locked_run_ids:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.run_id",
+                    "plan draft would overwrite existing locked contract: " + ", ".join(locked_run_ids),
+                )
+            ]
+        )
     init_project(root_path, mode=active_mode, executor=executor)
     brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
     matrix = draft_matrix(goal_text, active_mode)
