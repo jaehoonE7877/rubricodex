@@ -20,6 +20,7 @@ from .artifacts import (
     validate_evidence,
     validate_matrix,
     validate_scorecard,
+    verify_matrix_lock,
     write_report,
     intent_path,
 )
@@ -53,6 +54,20 @@ def cmd_intent_validate(args: argparse.Namespace) -> int:
 def cmd_matrix_validate(args: argparse.Namespace) -> int:
     data = read_json(args.file or matrix_path(args.root))
     result = _validation_result("evaluation_matrix", validate_matrix(data, args.mode))
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
+
+
+def cmd_matrix_lock(args: argparse.Namespace) -> int:
+    result = verify_matrix_lock(
+        args.root,
+        args.run_id,
+        mode=args.mode,
+        revision_reason=args.approve_revision,
+        brief_file=args.brief,
+        matrix_file=args.matrix,
+        goal_file=args.goal,
+    )
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
@@ -132,6 +147,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(matrix_validate)
     matrix_validate.add_argument("--file", type=Path)
     matrix_validate.set_defaults(func=cmd_matrix_validate)
+    matrix_lock = matrix_sub.add_parser("lock")
+    add_common(matrix_lock)
+    matrix_lock.add_argument("--run-id", required=True)
+    matrix_lock.add_argument("--approve-revision")
+    matrix_lock.add_argument("--brief", type=Path)
+    matrix_lock.add_argument("--matrix", type=Path)
+    matrix_lock.add_argument("--goal", type=Path)
+    matrix_lock.set_defaults(func=cmd_matrix_lock)
 
     goal = subparsers.add_parser("goal")
     goal_sub = goal.add_subparsers(dest="goal_command", required=True)

@@ -18,6 +18,8 @@ BRIEF_TYPE = "rubricodex.intent_brief"
 MATRIX_TYPE = "rubricodex.evaluation_matrix"
 EVIDENCE_TYPE = "rubricodex.evidence"
 SCORECARD_TYPE = "rubricodex.scorecard"
+GOAL_LOCK_TYPE = "rubricodex.goal_lock"
+MATRIX_LOCK_RESULT_TYPE = "rubricodex.matrix_lock_result"
 
 REQUIRED_BRIEF_BLOCKS = (
     "purpose",
@@ -69,6 +71,8 @@ STATUS_ORDER = {
     "fail": 3,
 }
 
+LIGHT_LOCK_MODES = {"micro", "quick"}
+
 
 @dataclass(frozen=True)
 class ValidationIssue:
@@ -104,6 +108,10 @@ def matrix_path(root: Path | str) -> Path:
 
 def taskpack_dir(root: Path | str, run_id: str) -> Path:
     return artifact_root(root) / "taskpacks" / run_id
+
+
+def goal_lock_path(root: Path | str, run_id: str) -> Path:
+    return taskpack_dir(root, run_id) / "goal.lock.json"
 
 
 def run_dir(root: Path | str, run_id: str) -> Path:
@@ -142,6 +150,41 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def guidance_fingerprint(executor: str) -> dict[str, Any]:
+    return {
+        "executor": executor,
+        "goal_headings": list(GOAL_HEADINGS),
+        "schema_version": SCHEMA_VERSION,
+    }
+
+
+def scope_fingerprint(brief: dict[str, Any]) -> dict[str, Any]:
+    blocks = brief.get("blocks", {})
+    return {
+        "scope_in": blocks.get("scope_in", []),
+        "scope_out": blocks.get("scope_out", []),
+    }
+
+
+def criteria_fingerprint(matrix: dict[str, Any]) -> list[dict[str, Any]]:
+    criteria = matrix.get("criteria", [])
+    if not isinstance(criteria, list):
+        return []
+    locked = []
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            continue
+        evidence_required = criterion.get("evidence_required", [])
+        locked.append(
+            {
+                "id": criterion.get("id"),
+                "hard_gate": bool(criterion.get("hard_gate")),
+                "evidence_required": list(evidence_required) if isinstance(evidence_required, list) else [],
+            }
+        )
+    return locked
+
+
 def base_artifact(artifact_type: str, mode: str = DEFAULT_MODE, run_id: str | None = None) -> dict[str, Any]:
     artifact: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -153,6 +196,37 @@ def base_artifact(artifact_type: str, mode: str = DEFAULT_MODE, run_id: str | No
     if run_id:
         artifact["run_id"] = run_id
     return artifact
+
+
+def build_goal_lock(
+    brief: dict[str, Any],
+    matrix: dict[str, Any],
+    goal_text: str,
+    executor: str,
+    mode: str,
+    run_id: str,
+    revision_reason: str | None = None,
+) -> dict[str, Any]:
+    guidance = guidance_fingerprint(executor)
+    lock = base_artifact(GOAL_LOCK_TYPE, mode=mode, run_id=run_id)
+    lock.update(
+        {
+            "lock_version": "matrix-lock-v0.5",
+            "executor": executor,
+            "brief_sha256": stable_hash(brief),
+            "matrix_sha256": stable_hash(matrix),
+            "goal_sha256": stable_hash(goal_text),
+            "guidance_sha256": stable_hash(guidance),
+            "locked_scope": scope_fingerprint(brief),
+            "locked_criteria": criteria_fingerprint(matrix),
+        }
+    )
+    if revision_reason is not None:
+        lock["revision"] = {
+            "reason": revision_reason,
+            "approved_at": now_iso(),
+        }
+    return lock
 
 
 def init_project(
@@ -425,17 +499,164 @@ Return the scorecard decision, evidence summary, and next retune instruction if 
         }
     )
     adapter_path = write_json(task_dir / "adapter-input.json", adapter_input)
-    lock = base_artifact("rubricodex.goal_lock", mode=mode, run_id=run_id)
-    lock.update(
+    lock_path = write_json(
+        task_dir / "goal.lock.json",
+        build_goal_lock(brief, matrix, goal_text, executor, mode, run_id),
+    )
+    return {"goal": goal_path, "adapter_input": adapter_path, "lock": lock_path}
+
+
+def _lock_drift_severity(mode: str) -> str:
+    return "warning" if mode in LIGHT_LOCK_MODES else "error"
+
+
+def _locked_criteria_by_id(lock: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    criteria = lock.get("locked_criteria")
+    if not isinstance(criteria, list):
+        return {}
+    return {
+        str(criterion.get("id")): criterion
+        for criterion in criteria
+        if isinstance(criterion, dict) and criterion.get("id")
+    }
+
+
+def _current_criteria_by_id(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    criteria = matrix.get("criteria")
+    if not isinstance(criteria, list):
+        return {}
+    return {
+        str(criterion.get("id")): criterion
+        for criterion in criteria
+        if isinstance(criterion, dict) and criterion.get("id")
+    }
+
+
+def validate_matrix_lock(
+    lock: dict[str, Any],
+    brief: dict[str, Any],
+    matrix: dict[str, Any],
+    goal_text: str,
+    mode: str = DEFAULT_MODE,
+) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(lock)
+    active_mode = mode or lock.get("mode") or matrix.get("mode") or DEFAULT_MODE
+    drift_severity = _lock_drift_severity(active_mode)
+
+    if lock.get("artifact_type") != GOAL_LOCK_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {GOAL_LOCK_TYPE}"))
+
+    current_hashes = {
+        "brief_sha256": stable_hash(brief),
+        "matrix_sha256": stable_hash(matrix),
+        "goal_sha256": stable_hash(goal_text),
+        "guidance_sha256": stable_hash(guidance_fingerprint(str(lock.get("executor", DEFAULT_EXECUTOR)))),
+    }
+    for key, current_hash in current_hashes.items():
+        if lock.get(key) != current_hash:
+            issues.append(ValidationIssue(f"$.{key}", f"{key} changed after lock", drift_severity))
+
+    locked_scope = lock.get("locked_scope")
+    current_scope = scope_fingerprint(brief)
+    if not isinstance(locked_scope, dict):
+        issues.append(ValidationIssue("$.locked_scope", "lock is missing scope fingerprint", drift_severity))
+    elif locked_scope != current_scope:
+        issues.append(ValidationIssue("$.locked_scope", "scope changed after lock", drift_severity))
+
+    locked_criteria = _locked_criteria_by_id(lock)
+    current_criteria = _current_criteria_by_id(matrix)
+    if not locked_criteria:
+        issues.append(ValidationIssue("$.locked_criteria", "lock is missing criteria fingerprint", drift_severity))
+
+    for criterion_id, locked in locked_criteria.items():
+        current = current_criteria.get(criterion_id)
+        if current is None:
+            issues.append(ValidationIssue(f"$.locked_criteria.{criterion_id}", "criterion was removed after lock"))
+            continue
+
+        if locked.get("hard_gate") is True and current.get("hard_gate") is not True:
+            issues.append(ValidationIssue(f"$.criteria.{criterion_id}.hard_gate", "hard gate was weakened after lock"))
+
+        locked_evidence = {
+            str(item)
+            for item in locked.get("evidence_required", [])
+            if str(item).strip()
+        }
+        current_evidence = {
+            str(item)
+            for item in current.get("evidence_required", [])
+            if str(item).strip()
+        }
+        missing_evidence = sorted(locked_evidence - current_evidence)
+        if missing_evidence:
+            issues.append(
+                ValidationIssue(
+                    f"$.criteria.{criterion_id}.evidence_required",
+                    "evidence_required was removed after lock: " + ", ".join(missing_evidence),
+                )
+            )
+
+    for criterion_id in current_criteria:
+        if criterion_id not in goal_text:
+            issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
+    return issues
+
+
+def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
+    return issue.message.startswith(
+        (
+            "criterion was removed",
+            "hard gate was weakened",
+            "evidence_required was removed",
+            "goal.md is missing criterion",
+        )
+    )
+
+
+def verify_matrix_lock(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    revision_reason: str | None = None,
+    brief_file: Path | str | None = None,
+    matrix_file: Path | str | None = None,
+    goal_file: Path | str | None = None,
+) -> dict[str, Any]:
+    root_path = Path(root)
+    lock_path = goal_lock_path(root_path, run_id)
+    lock = read_json(lock_path)
+    brief = read_json(brief_file or intent_path(root_path))
+    matrix = read_json(matrix_file or matrix_path(root_path))
+    goal_path = Path(goal_file) if goal_file else taskpack_dir(root_path, run_id) / "goal.md"
+    goal_text = goal_path.read_text(encoding="utf-8")
+
+    assert_valid(validate_brief(brief, mode))
+    assert_valid(validate_matrix(matrix, mode))
+    assert_valid(lint_goal_text(goal_text, mode))
+
+    issues = validate_matrix_lock(lock, brief, matrix, goal_text, mode)
+    errors = [issue for issue in issues if issue.severity == "error"]
+    revision_reason = revision_reason.strip() if revision_reason else None
+    revision_approved = False
+
+    if errors and revision_reason and not any(_is_unsafe_lock_issue(issue) for issue in errors):
+        executor = str(lock.get("executor", DEFAULT_EXECUTOR))
+        updated_lock = build_goal_lock(brief, matrix, goal_text, executor, mode, run_id, revision_reason)
+        write_json(lock_path, updated_lock)
+        issues = []
+        errors = []
+        revision_approved = True
+
+    result = base_artifact(MATRIX_LOCK_RESULT_TYPE, mode=mode, run_id=run_id)
+    result.update(
         {
-            "executor": executor,
-            "brief_sha256": stable_hash(brief),
-            "matrix_sha256": stable_hash(matrix),
-            "goal_sha256": stable_hash(goal_text),
+            "status": "pass" if not errors else "fail",
+            "revision_approved": revision_approved,
+            "lock_path": str(lock_path),
+            "issues": [issue.as_dict() for issue in issues],
         }
     )
-    lock_path = write_json(task_dir / "goal.lock.json", lock)
-    return {"goal": goal_path, "adapter_input": adapter_path, "lock": lock_path}
+    return result
 
 
 def _section_content(text: str, heading: str) -> str | None:
