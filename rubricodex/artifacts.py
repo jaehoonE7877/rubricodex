@@ -1655,6 +1655,24 @@ def import_app_session(root: Path | str, source_file: Path | str, mode: str = DE
     }
 
 
+def _validate_app_card_shared_refs(
+    cards: dict[str, Any],
+    report_ref: str,
+    retune_ref: str,
+) -> list[ValidationIssue]:
+    card_refs = {
+        card["card_type"]: set(card.get("artifact_refs", []))
+        for card in cards["cards"]
+        if isinstance(card, dict) and isinstance(card.get("artifact_refs"), list)
+    }
+    issues: list[ValidationIssue] = []
+    if report_ref not in card_refs.get("report", set()):
+        issues.append(ValidationIssue("$.cards.report.artifact_refs", f"report card must reference {report_ref}"))
+    if retune_ref not in card_refs.get("retune", set()):
+        issues.append(ValidationIssue("$.cards.retune.artifact_refs", f"retune card must reference {retune_ref}"))
+    return issues
+
+
 def collect_app_artifacts(root: Path | str, run_id: str, mode: str = DEFAULT_MODE) -> dict[str, Any]:
     root_path = Path(root)
     session, session_file = _find_app_session_for_run(root_path, run_id)
@@ -1669,16 +1687,7 @@ def collect_app_artifacts(root: Path | str, run_id: str, mode: str = DEFAULT_MOD
     retune = run_dir(root_path, run_id) / "retune_goal.md"
     report_ref = _relative_artifact_path(report, root_path)
     retune_ref = _relative_artifact_path(retune, root_path)
-    card_refs = {
-        card["card_type"]: set(card.get("artifact_refs", []))
-        for card in cards["cards"]
-        if isinstance(card, dict) and isinstance(card.get("artifact_refs"), list)
-    }
-    link_issues: list[ValidationIssue] = []
-    if report_ref not in card_refs.get("report", set()):
-        link_issues.append(ValidationIssue("$.cards.report.artifact_refs", f"report card must reference {report_ref}"))
-    if retune_ref not in card_refs.get("retune", set()):
-        link_issues.append(ValidationIssue("$.cards.retune.artifact_refs", f"retune card must reference {retune_ref}"))
+    link_issues = _validate_app_card_shared_refs(cards, report_ref, retune_ref)
     if link_issues:
         raise ArtifactError(link_issues)
 
@@ -1738,6 +1747,13 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
             if cards_file.is_file():
                 cards = read_json(cards_file)
                 status_issues.extend(validate_app_cards(cards, session))
+                status_issues.extend(
+                    _validate_app_card_shared_refs(
+                        cards,
+                        required["report"],
+                        required["retune_goal"],
+                    )
+                )
             else:
                 status_issues.append(ValidationIssue("$.cards_path", f"cards.json is missing at {cards_file}"))
         except ArtifactError as error:
