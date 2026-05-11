@@ -415,7 +415,15 @@ def _contains_any(text: str, keywords: set[str]) -> bool:
     for keyword in keywords:
         normalized = keyword.lower()
         if normalized.isascii():
-            if re.search(rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])", lowered):
+            variants = {normalized}
+            if len(normalized) > 2:
+                variants.add(normalized + "s")
+                if normalized.endswith("y"):
+                    variants.add(normalized[:-1] + "ies")
+                elif normalized.endswith(("s", "x", "z", "ch", "sh")):
+                    variants.add(normalized + "es")
+            pattern = "|".join(re.escape(item) for item in sorted(variants, key=len, reverse=True))
+            if re.search(rf"(?<![a-z0-9])(?:{pattern})(?![a-z0-9])", lowered):
                 return True
         elif normalized in lowered:
             return True

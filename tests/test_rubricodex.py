@@ -401,6 +401,8 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("권한 migration을 안전하게 수정", "auto"), "strict")
         self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
         self.assertEqual(classify_mode("Implement authentication middleware with tests", "auto"), "strict")
+        self.assertEqual(classify_mode("Fix user permissions bug", "auto"), "strict")
+        self.assertEqual(classify_mode("Implement payments dashboard", "auto"), "strict")
         self.assertEqual(classify_mode("review and fix auth bug", "auto"), "strict")
         self.assertEqual(classify_mode("Review and improve authentication middleware with tests", "auto"), "strict")
         self.assertEqual(classify_mode("Review and improve dashboard UI with tests", "auto"), "standard")
