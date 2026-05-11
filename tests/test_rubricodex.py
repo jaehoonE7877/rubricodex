@@ -25,9 +25,12 @@ from rubricodex.artifacts import (
     app_cards_path,
     app_collection_path,
     app_session_path,
+    assess_request_readiness,
+    classify_mode,
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    draft_harness,
     goal_lock_path,
     import_app_session,
     init_project,
@@ -129,7 +132,12 @@ def sample_matrix(mode: str = "standard", count: int = 5, hard_ids: set[int] | N
     }
 
 
-def sample_evidence(matrix: dict, statuses: dict[str, str] | None = None, scope_out_drift: str | None = None) -> dict:
+def sample_evidence(
+    matrix: dict,
+    statuses: dict[str, str] | None = None,
+    scope_out_drift: str | None = None,
+    run_id: str = "example-v0.1",
+) -> dict:
     statuses = statuses or {}
     items = []
     for item in matrix["criteria"]:
@@ -154,7 +162,7 @@ def sample_evidence(matrix: dict, statuses: dict[str, str] | None = None, scope_
         "rubricodex_version": "0.1.0",
         "created_at": "2026-05-11T00:00:00Z",
         "mode": matrix["mode"],
-        "run_id": "example-v0.1",
+        "run_id": run_id,
         "executor": "codex-cli-goal",
         "raw_output_stored": False,
         "evidence_items": items,
@@ -302,6 +310,89 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(validate_matrix(sample_matrix(mode="micro", count=3, hard_ids={1}), "micro"))
         self.assertEqual(validate_matrix(sample_matrix(mode="strict", count=6, hard_ids={1}), "strict"), [])
         self.assertTrue(validate_matrix(sample_matrix(mode="strict", count=5, hard_ids={1}), "strict"))
+
+    def test_plan_draft_auto_classifies_and_writes_taskpack(self) -> None:
+        result = draft_harness(
+            self.root,
+            "draft-strict",
+            "결제 권한 migration 위험을 고려해서 API endpoint를 수정하고 테스트로 검증해줘.",
+        )
+
+        brief = read_json(intent_path(self.root))
+        matrix = read_json(matrix_path(self.root))
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["mode"], "strict")
+        self.assertEqual(brief["request_readiness"]["max_score"], 6)
+        self.assertEqual(validate_brief(brief, "strict"), [])
+        self.assertEqual(validate_matrix(matrix, "strict"), [])
+        self.assertTrue((self.root / ".rubricodex/taskpacks/draft-strict/goal.md").is_file())
+        self.assertEqual(lint_goal_file(self.root, "draft-strict", mode="strict")["status"], "pass")
+
+    def test_plan_draft_rejects_empty_goal(self) -> None:
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(self.root, "empty", " ")
+
+        self.assertIn("goal must be non-empty", str(context.exception))
+
+    def test_request_readiness_records_assumptions_without_raw_fields(self) -> None:
+        readiness = assess_request_readiness("대시보드를 만들어줘", "standard")
+
+        self.assertIn(readiness["status"], {"needs_assumption", "needs_clarification"})
+        self.assertTrue(readiness["assumptions"])
+        self.assertNotIn("raw_transcript", str(readiness))
+
+    def test_mode_classifier_uses_lowest_sufficient_mode(self) -> None:
+        self.assertEqual(classify_mode("오타 문구 수정", "auto"), "micro")
+        self.assertEqual(classify_mode("작은 버그 수정", "auto"), "quick")
+        self.assertEqual(classify_mode("권한 migration을 안전하게 수정", "auto"), "strict")
+        self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
+        self.assertEqual(classify_mode("관리자 대시보드를 만들어줘", "auto"), "standard")
+
+    def test_v10_all_modes_draft_and_orchestrate(self) -> None:
+        mode_goals = {
+            "micro": "오타 문구 수정",
+            "quick": "작은 버그 수정",
+            "standard": "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            "strict": "결제 권한 migration 위험을 고려해서 API endpoint를 수정하고 test evidence를 남겨줘.",
+            "audit": "현재 diff를 review하고 findings report evidence를 남겨줘.",
+        }
+        for mode, goal in mode_goals.items():
+            with self.subTest(mode=mode):
+                root = self.root / mode
+                run_id = f"{mode}-fixture"
+                draft = draft_harness(root, run_id, goal, mode=mode)
+                matrix = read_json(matrix_path(root))
+                write_json(run_dir(root, run_id) / "evidence.json", sample_evidence(matrix, run_id=run_id))
+                result = orchestrate_run(root, run_id, mode=mode, parallel=1)
+                status = orchestrate_status(root, run_id)
+
+                self.assertEqual(draft["status"], "pass")
+                self.assertEqual(result["status"], "pass")
+                self.assertEqual(status["status"], "complete")
+                self.assertEqual(status["decision"], "pass")
+
+    def test_cli_plan_draft_command(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "cli-draft",
+                    "--mode",
+                    "quick",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"mode": "quick"', stdout.getvalue())
+        self.assertIn('"status": "pass"', stdout.getvalue())
+        self.assertTrue((self.root / ".rubricodex/taskpacks/cli-draft/goal.md").is_file())
 
     def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
         self.write_default_contract()
