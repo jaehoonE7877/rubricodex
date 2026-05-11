@@ -23,6 +23,9 @@ GOAL_LOCK_TYPE = "rubricodex.goal_lock"
 MATRIX_LOCK_RESULT_TYPE = "rubricodex.matrix_lock_result"
 RUN_MANIFEST_TYPE = "rubricodex.run_manifest"
 LOCAL_RUNNER_EXECUTOR = "codex-cli-local"
+PROBE_PLAN_TYPE = "rubricodex.probe_plan"
+PROBE_RESULT_TYPE = "rubricodex.probe_result"
+PROBE_RESULT_STATUSES = {"probe_pass", "probe_failure", "probe_error", "probe_skipped"}
 
 REQUIRED_BRIEF_BLOCKS = (
     "purpose",
@@ -117,12 +120,32 @@ def goal_lock_path(root: Path | str, run_id: str) -> Path:
     return taskpack_dir(root, run_id) / "goal.lock.json"
 
 
+def probe_dir(root: Path | str, run_id: str) -> Path:
+    return taskpack_dir(root, run_id) / "probes"
+
+
+def probe_plan_path(root: Path | str, run_id: str) -> Path:
+    return taskpack_dir(root, run_id) / "probe-plan.json"
+
+
+def probe_prompt_path(root: Path | str, run_id: str, criterion_id: str) -> Path:
+    return probe_dir(root, run_id) / f"{criterion_id}.md"
+
+
 def run_dir(root: Path | str, run_id: str) -> Path:
     return artifact_root(root) / "runs" / run_id
 
 
 def run_manifest_path(root: Path | str, run_id: str) -> Path:
     return run_dir(root, run_id) / "run-manifest.json"
+
+
+def probe_result_dir(root: Path | str, run_id: str) -> Path:
+    return run_dir(root, run_id) / "probes"
+
+
+def probe_result_path(root: Path | str, run_id: str, criterion_id: str) -> Path:
+    return probe_result_dir(root, run_id) / f"{criterion_id}.json"
 
 
 def read_json(path: Path | str) -> dict[str, Any]:
@@ -452,6 +475,80 @@ def validate_run_manifest(data: dict[str, Any]) -> list[ValidationIssue]:
             issues.append(ValidationIssue(f"{path}.exit_code", "exit_code must be an integer or null"))
         if not isinstance(result.get("summary"), str) or not result["summary"].strip():
             issues.append(ValidationIssue(f"{path}.summary", "summary is required"))
+    return issues
+
+
+def validate_probe_plan(data: dict[str, Any]) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != PROBE_PLAN_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {PROBE_PLAN_TYPE}"))
+    if data.get("executor") != LOCAL_RUNNER_EXECUTOR:
+        issues.append(ValidationIssue("$.executor", f"executor must be {LOCAL_RUNNER_EXECUTOR}"))
+    if data.get("raw_output_stored") is not False:
+        issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
+    if not isinstance(data.get("parallel"), int) or data["parallel"] < 1:
+        issues.append(ValidationIssue("$.parallel", "parallel must be an integer greater than zero"))
+
+    selected = data.get("selected_probes")
+    skipped = data.get("skipped_probes")
+    if not isinstance(selected, list):
+        issues.append(ValidationIssue("$.selected_probes", "selected_probes must be a list"))
+        selected = []
+    if not isinstance(skipped, list):
+        issues.append(ValidationIssue("$.skipped_probes", "skipped_probes must be a list"))
+        skipped = []
+
+    seen: set[str] = set()
+    for index, probe in enumerate(selected):
+        path = f"$.selected_probes[{index}]"
+        if not isinstance(probe, dict):
+            issues.append(ValidationIssue(path, "selected probe must be an object"))
+            continue
+        criterion_id = probe.get("criterion_id")
+        if not isinstance(criterion_id, str) or not criterion_id.strip():
+            issues.append(ValidationIssue(f"{path}.criterion_id", "criterion_id is required"))
+        elif criterion_id in seen:
+            issues.append(ValidationIssue(f"{path}.criterion_id", f"duplicate criterion id {criterion_id}"))
+        else:
+            seen.add(criterion_id)
+        if probe.get("read_only") is not True:
+            issues.append(ValidationIssue(f"{path}.read_only", "probe must be read-only"))
+        if not isinstance(probe.get("prompt_path"), str) or not probe["prompt_path"].strip():
+            issues.append(ValidationIssue(f"{path}.prompt_path", "prompt_path is required"))
+        if not isinstance(probe.get("selection_reason"), str) or not probe["selection_reason"].strip():
+            issues.append(ValidationIssue(f"{path}.selection_reason", "selection_reason is required"))
+
+    for index, probe in enumerate(skipped):
+        path = f"$.skipped_probes[{index}]"
+        if not isinstance(probe, dict):
+            issues.append(ValidationIssue(path, "skipped probe must be an object"))
+            continue
+        if not isinstance(probe.get("criterion_id"), str) or not probe["criterion_id"].strip():
+            issues.append(ValidationIssue(f"{path}.criterion_id", "criterion_id is required"))
+        if not isinstance(probe.get("skip_reason"), str) or not probe["skip_reason"].strip():
+            issues.append(ValidationIssue(f"{path}.skip_reason", "skip_reason is required"))
+    return issues
+
+
+def validate_probe_result(data: dict[str, Any]) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != PROBE_RESULT_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {PROBE_RESULT_TYPE}"))
+    if not isinstance(data.get("criterion_id"), str) or not data["criterion_id"].strip():
+        issues.append(ValidationIssue("$.criterion_id", "criterion_id is required"))
+    if data.get("status") not in PROBE_RESULT_STATUSES:
+        issues.append(ValidationIssue("$.status", "status must be probe_pass, probe_failure, probe_error, or probe_skipped"))
+    if not isinstance(data.get("summary"), str) or not data["summary"].strip():
+        issues.append(ValidationIssue("$.summary", "summary is required"))
+    if data.get("read_only") is not True:
+        issues.append(ValidationIssue("$.read_only", "read_only must be true"))
+    if data.get("raw_output_stored") is not False:
+        issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
+    for forbidden in ("stdout", "stderr", "raw_output", "output"):
+        if forbidden in data:
+            issues.append(ValidationIssue(f"$.{forbidden}", "raw probe output fields are not allowed"))
+    if "exit_code" in data and data["exit_code"] is not None and not isinstance(data["exit_code"], int):
+        issues.append(ValidationIssue("$.exit_code", "exit_code must be an integer or null"))
     return issues
 
 
@@ -914,6 +1011,193 @@ def run_local(
     }
 
 
+def _criterion_lookup(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(criterion["id"]): criterion
+        for criterion in matrix.get("criteria", [])
+        if isinstance(criterion, dict) and criterion.get("id")
+    }
+
+
+def _probe_prompt(run_id: str, criterion: dict[str, Any]) -> str:
+    evidence = "\n".join(f"- {item}" for item in criterion.get("evidence_required", []))
+    return f"""/goal Read-only Rubricodex probe for {criterion['id']} in taskpack {run_id}.
+
+## Criterion
+- ID: {criterion['id']}
+- Name: {criterion['name']}
+- Check: {criterion['check_question']}
+
+## Required evidence
+{evidence}
+
+## Read-only policy
+Do not modify files.
+Do not run destructive commands.
+Do not store raw transcripts, raw task logs, stdout, stderr, or unredacted command output.
+
+## Report back
+Return a concise summary, one of probe_pass/probe_failure/probe_error, and summarized evidence references only.
+"""
+
+
+def plan_probes(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    criterion_ids: list[str] | None = None,
+    include_supporting: bool = False,
+    parallel: int = 4,
+) -> dict[str, Any]:
+    root_path = Path(root)
+    _assert_local_runner_ready(root_path, run_id, mode)
+    matrix = read_json(matrix_path(root_path))
+    assert_valid(validate_matrix(matrix, mode))
+
+    requested = {criterion_id for criterion_id in (criterion_ids or []) if criterion_id.strip()}
+    criteria_by_id = _criterion_lookup(matrix)
+    unknown = sorted(requested - set(criteria_by_id))
+    if unknown:
+        raise ArtifactError([ValidationIssue("$.criterion_ids", "unknown criterion ids: " + ", ".join(unknown))])
+
+    selected: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for criterion in matrix["criteria"]:
+        criterion_id = criterion["id"]
+        hard_gate = bool(criterion.get("hard_gate"))
+        should_select = include_supporting or hard_gate or criterion_id in requested
+        if should_select:
+            prompt_path = probe_prompt_path(root_path, run_id, criterion_id)
+            write_text(prompt_path, _probe_prompt(run_id, criterion))
+            selected.append(
+                {
+                    "criterion_id": criterion_id,
+                    "prompt_path": _relative_artifact_path(prompt_path, root_path),
+                    "selection_reason": "hard_gate" if hard_gate else "explicit_request" if criterion_id in requested else "include_supporting",
+                    "read_only": True,
+                }
+            )
+        else:
+            skipped.append(
+                {
+                    "criterion_id": criterion_id,
+                    "skip_reason": "supporting criterion skipped by default selective policy",
+                }
+            )
+
+    plan = base_artifact(PROBE_PLAN_TYPE, mode=mode, run_id=run_id)
+    plan.update(
+        {
+            "executor": LOCAL_RUNNER_EXECUTOR,
+            "parallel": parallel,
+            "raw_output_stored": False,
+            "selected_probes": selected,
+            "skipped_probes": skipped,
+        }
+    )
+    assert_valid(validate_probe_plan(plan))
+    plan_path = write_json(probe_plan_path(root_path, run_id), plan)
+    return {
+        "status": "pass",
+        "probe_plan_path": str(plan_path),
+        "selected": [probe["criterion_id"] for probe in selected],
+        "skipped": [probe["criterion_id"] for probe in skipped],
+    }
+
+
+def _probe_result(
+    root: Path,
+    run_id: str,
+    mode: str,
+    criterion_id: str,
+    status: str,
+    summary: str,
+    exit_code: int | None = None,
+) -> dict[str, Any]:
+    result = base_artifact(PROBE_RESULT_TYPE, mode=mode, run_id=run_id)
+    result.update(
+        {
+            "criterion_id": criterion_id,
+            "status": status,
+            "summary": summary,
+            "read_only": True,
+            "raw_output_stored": False,
+            "prompt_path": _relative_artifact_path(probe_prompt_path(root, run_id, criterion_id), root),
+        }
+    )
+    if exit_code is not None:
+        result["exit_code"] = exit_code
+    return result
+
+
+def run_probes(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    parallel: int = 4,
+    execute: bool = False,
+    codex_bin: str = "codex",
+) -> dict[str, Any]:
+    root_path = Path(root)
+    if parallel < 1:
+        raise ArtifactError([ValidationIssue("$.parallel", "parallel must be greater than zero")])
+    plan = read_json(probe_plan_path(root_path, run_id))
+    assert_valid(validate_probe_plan(plan))
+
+    status = "pass"
+    result_paths: list[str] = []
+    for probe in plan["selected_probes"]:
+        criterion_id = probe["criterion_id"]
+        if execute:
+            prompt = probe_prompt_path(root_path, run_id, criterion_id).read_text(encoding="utf-8")
+            completed = subprocess.run(
+                [codex_bin, "exec", "--cd", str(root_path), "-"],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode == 0:
+                probe_result = _probe_result(
+                    root_path,
+                    run_id,
+                    mode,
+                    criterion_id,
+                    "probe_pass",
+                    "Probe command exited successfully; raw output discarded.",
+                    exit_code=0,
+                )
+            else:
+                status = "fail"
+                probe_result = _probe_result(
+                    root_path,
+                    run_id,
+                    mode,
+                    criterion_id,
+                    "probe_error",
+                    f"Probe command exited with code {completed.returncode}; raw output discarded.",
+                    exit_code=completed.returncode,
+                )
+        else:
+            probe_result = _probe_result(
+                root_path,
+                run_id,
+                mode,
+                criterion_id,
+                "probe_skipped",
+                "Dry-run only; read-only probe prompt was generated but not executed.",
+            )
+        assert_valid(validate_probe_result(probe_result))
+        path = write_json(probe_result_path(root_path, run_id, criterion_id), probe_result)
+        result_paths.append(str(path))
+
+    return {
+        "status": status,
+        "parallel": parallel,
+        "probe_results": result_paths,
+    }
+
+
 def compute_scorecard(
     root: Path | str,
     run_id: str,
@@ -1011,6 +1295,27 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
         report_lines.append(f"- {result['criterion_id']} {result['name']}: {result['status']}")
         if result["status"] != "pass":
             retune_results.append(result)
+
+    probe_plan_file = probe_plan_path(root_path, run_id)
+    if probe_plan_file.exists():
+        probe_plan = read_json(probe_plan_file)
+        assert_valid(validate_probe_plan(probe_plan))
+        report_lines.extend(["", "## Probes"])
+        if probe_plan["selected_probes"]:
+            for probe in probe_plan["selected_probes"]:
+                criterion_id = probe["criterion_id"]
+                result_file = probe_result_path(root_path, run_id, criterion_id)
+                if result_file.exists():
+                    probe_result = read_json(result_file)
+                    assert_valid(validate_probe_result(probe_result))
+                    report_lines.append(f"- {criterion_id}: {probe_result['status']}")
+                else:
+                    report_lines.append(f"- {criterion_id}: planned")
+        else:
+            report_lines.append("- No probes selected.")
+        for probe in probe_plan["skipped_probes"]:
+            report_lines.append(f"- {probe['criterion_id']} skipped: {probe['skip_reason']}")
+
     report_lines.extend(["", "## Next action"])
     if retune_results:
         report_lines.append("Run the retune goal for the failed or partial criteria only.")
