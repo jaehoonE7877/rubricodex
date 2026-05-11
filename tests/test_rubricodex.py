@@ -791,6 +791,15 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(missing_cards_status["status"], "fail")
         self.assertIn("$.cards", {issue["path"] for issue in missing_cards_status["issues"]})
 
+        cards = sample_app_cards()
+        cards["cards"][2]["artifact_refs"] = [[".rubricodex/runs/example-v0.1/report.md"]]
+        write_json(app_cards_path(self.root, "example-session"), cards)
+
+        malformed_refs_status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(malformed_refs_status["status"], "fail")
+        self.assertIn("$.cards[2].artifact_refs[0]", {issue["path"] for issue in malformed_refs_status["issues"]})
+
     def test_orchestrate_run_fails_when_app_collection_is_invalid(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")

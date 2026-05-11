@@ -1663,13 +1663,15 @@ def _validate_app_card_shared_refs(
     card_items = cards.get("cards")
     if not isinstance(card_items, list):
         return []
-    card_refs = {
-        card["card_type"]: set(card["artifact_refs"])
-        for card in card_items
-        if isinstance(card, dict)
-        and isinstance(card.get("card_type"), str)
-        and isinstance(card.get("artifact_refs"), list)
-    }
+    card_refs: dict[str, set[str]] = {}
+    for card in card_items:
+        if not isinstance(card, dict):
+            continue
+        card_type = card.get("card_type")
+        artifact_refs = card.get("artifact_refs")
+        if not isinstance(card_type, str) or not isinstance(artifact_refs, list):
+            continue
+        card_refs[card_type] = {artifact_ref for artifact_ref in artifact_refs if isinstance(artifact_ref, str)}
     issues: list[ValidationIssue] = []
     if report_ref not in card_refs.get("report", set()):
         issues.append(ValidationIssue("$.cards.report.artifact_refs", f"report card must reference {report_ref}"))

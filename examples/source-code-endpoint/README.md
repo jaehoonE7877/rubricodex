@@ -17,8 +17,8 @@
 5. `rubricodex goal compile --run-id example-v0.1`로 taskpack을 생성합니다.
 6. `rubricodex prompt lint --run-id example-v0.1`로 실행 prompt를 확인합니다.
 7. `rubricodex matrix lock --run-id example-v0.1`로 기준 drift를 확인합니다.
-8. `rubricodex orchestrate run --run-id example-v0.1 --parallel 2`로 local handoff, probes, scorecard, report, retune, app collection을 한 번에 갱신합니다.
-9. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
+8. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
+9. `rubricodex orchestrate run --run-id example-v0.1 --parallel 2`로 local handoff, probes, scorecard, report, retune, app collection을 현재 evidence 기준으로 갱신합니다.
 10. `rubricodex orchestrate status --run-id example-v0.1`와 `rubricodex app collect --run-id example-v0.1`로 app/local artifact가 같은 report와 retune instruction을 참조하는지 확인합니다. `retune_goal.md`는 failed/partial/missing_evidence 기준만 다시 시도하고 pass 기준은 보존 목록으로 보호합니다.
 
 ## Modes
