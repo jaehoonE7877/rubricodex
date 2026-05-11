@@ -1,0 +1,70 @@
+{
+  "artifact_type": "rubricodex.evidence",
+  "created_at": "2026-05-11T00:00:00Z",
+  "evidence_items": [
+    {
+      "artifact_refs": [
+        "examples/source-code-endpoint/src/server.js",
+        "examples/source-code-endpoint/test/server.test.js"
+      ],
+      "confidence": 0.9,
+      "criterion_id": "C-01",
+      "id": "E-C-01",
+      "kind": "code-and-test",
+      "status": "pass",
+      "summary": "The fixture exposes POST /api/widgets and tests the 201 response with widget fields."
+    },
+    {
+      "artifact_refs": [
+        "examples/source-code-endpoint/src/server.js",
+        "examples/source-code-endpoint/test/server.test.js"
+      ],
+      "confidence": 0.9,
+      "criterion_id": "C-02",
+      "id": "E-C-02",
+      "kind": "code-and-test",
+      "status": "pass",
+      "summary": "The validation branch rejects missing, empty, or non-string names and tests the 400 response."
+    },
+    {
+      "artifact_refs": [
+        "examples/source-code-endpoint/src/server.js",
+        "examples/source-code-endpoint/test/server.test.js"
+      ],
+      "confidence": 0.8,
+      "criterion_id": "C-03",
+      "id": "E-C-03",
+      "kind": "code-and-test",
+      "status": "pass",
+      "summary": "The response includes id, name, and createdAt fields for created widgets."
+    },
+    {
+      "artifact_refs": [
+        "examples/source-code-endpoint/test/server.test.js"
+      ],
+      "confidence": 0.9,
+      "criterion_id": "C-04",
+      "id": "E-C-04",
+      "kind": "test",
+      "status": "pass",
+      "summary": "The fixture has focused node:test coverage for health, valid create, and invalid create behavior."
+    },
+    {
+      "artifact_refs": [
+        "examples/source-code-endpoint/src/server.js"
+      ],
+      "confidence": 0.7,
+      "criterion_id": "C-05",
+      "id": "E-C-05",
+      "kind": "review-summary",
+      "status": "partial",
+      "summary": "The implementation is small and dependency-free, but the maintainability evidence should be stated more explicitly in the report."
+    }
+  ],
+  "executor": "codex-cli-goal",
+  "mode": "standard",
+  "raw_output_stored": false,
+  "rubricodex_version": "0.1.0",
+  "run_id": "example-v0.1",
+  "schema_version": "rubricodex.v0.1"
+}

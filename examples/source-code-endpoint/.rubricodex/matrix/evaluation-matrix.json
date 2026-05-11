@@ -1,0 +1,93 @@
+{
+  "artifact_type": "rubricodex.evaluation_matrix",
+  "created_at": "2026-05-11T00:00:00Z",
+  "criteria": [
+    {
+      "check_question": "Does POST /api/widgets return 201 with a created widget for valid JSON input?",
+      "claim": "The endpoint contract is implemented.",
+      "evidence_required": [
+        "Implementation reference for POST /api/widgets",
+        "Test reference for valid widget creation"
+      ],
+      "hard_gate": true,
+      "id": "C-01",
+      "levels": {
+        "fail": "No valid POST /api/widgets path exists.",
+        "partial": "The endpoint exists but response status or payload shape is incomplete.",
+        "pass": "The endpoint returns 201 with id, name, and createdAt for valid input."
+      },
+      "name": "Endpoint contract",
+      "retune_hint": "Fix the POST /api/widgets response contract before changing supporting criteria."
+    },
+    {
+      "check_question": "Does invalid input return 400 without creating a widget?",
+      "claim": "Input validation rejects invalid widget names.",
+      "evidence_required": [
+        "Implementation reference for validation branch",
+        "Test reference for missing or empty name"
+      ],
+      "hard_gate": true,
+      "id": "C-02",
+      "levels": {
+        "fail": "Invalid input is accepted or crashes the server.",
+        "partial": "Some invalid inputs fail but the response contract is inconsistent.",
+        "pass": "Missing, empty, or non-string names return 400 with an error payload."
+      },
+      "name": "Input validation",
+      "retune_hint": "Tighten validation while preserving the valid-input contract."
+    },
+    {
+      "check_question": "Does each created widget have stable id, name, and createdAt fields?",
+      "claim": "The endpoint preserves minimal in-memory data integrity.",
+      "evidence_required": [
+        "Implementation reference for widget creation",
+        "Test reference for response fields"
+      ],
+      "hard_gate": false,
+      "id": "C-03",
+      "levels": {
+        "fail": "Created widget data is missing or inconsistent.",
+        "partial": "Widget data exists but field semantics are not fully asserted.",
+        "pass": "id, name, and createdAt are present and stable for the response."
+      },
+      "name": "Data integrity",
+      "retune_hint": "Add summarized evidence for the response fields without expanding persistence scope."
+    },
+    {
+      "check_question": "Do fixture tests cover health, valid create, and invalid create behavior?",
+      "claim": "The fixture has focused regression coverage.",
+      "evidence_required": [
+        "node:test references for health and widget flows"
+      ],
+      "hard_gate": false,
+      "id": "C-04",
+      "levels": {
+        "fail": "No meaningful tests cover the endpoint.",
+        "partial": "Only one path is covered.",
+        "pass": "Tests cover health, valid create, and invalid create behavior."
+      },
+      "name": "Test coverage",
+      "retune_hint": "Add missing focused tests without adding dependencies."
+    },
+    {
+      "check_question": "Is the implementation small and consistent with the fixture style?",
+      "claim": "The fixture remains simple and maintainable.",
+      "evidence_required": [
+        "Implementation summary confirming no heavy abstraction or new dependency"
+      ],
+      "hard_gate": false,
+      "id": "C-05",
+      "levels": {
+        "fail": "The implementation adds unnecessary layers or dependencies.",
+        "partial": "The code is acceptable but needs a clearer maintainability note.",
+        "pass": "The code stays small, explicit, and dependency-free."
+      },
+      "name": "Maintainability",
+      "retune_hint": "Clarify the maintainability evidence while keeping the implementation unchanged."
+    }
+  ],
+  "method": "gqe-r-lite",
+  "mode": "standard",
+  "rubricodex_version": "0.1.0",
+  "schema_version": "rubricodex.v0.1"
+}

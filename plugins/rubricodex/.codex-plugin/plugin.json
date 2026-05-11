@@ -1,0 +1,28 @@
+{
+  "name": "rubricodex",
+  "version": "0.1.0",
+  "description": "Compress ambiguous Codex implementation requests into bounded goals, evidence, scorecards, and retune instructions.",
+  "author": {
+    "name": "Rubricodex",
+    "url": "https://github.com"
+  },
+  "homepage": "https://app.notion.com/p/3544408817af8182b23ecf3ba169d82e",
+  "license": "MIT",
+  "keywords": ["codex", "quality", "harness", "evaluation"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Rubricodex",
+    "shortDescription": "Output-quality harness for Codex goals.",
+    "longDescription": "Rubricodex turns ambiguous implementation requests into a bounded intent brief, evaluation matrix, taskpack, summarized evidence, scorecard, and retune instruction.",
+    "developerName": "Rubricodex",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://app.notion.com/p/3544408817af8182b23ecf3ba169d82e",
+    "defaultPrompt": [
+      "Use Rubricodex to turn this request into a bounded goal.",
+      "Score this implementation with the Rubricodex matrix.",
+      "Create a retune goal from this Rubricodex scorecard."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

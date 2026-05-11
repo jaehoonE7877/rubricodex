@@ -1,6 +1,6 @@
 # Source Code Endpoint Fixture
 
-이 fixture는 Rubricodex v0.1의 수동 `@Rubricodex` mention playbook을 검증합니다. 실제 Codex app plugin, CLI runner, schema validation 없이도 target, matrix, taskpack, scorecard/report가 한 흐름으로 이어지는지 보여줍니다.
+이 fixture는 Rubricodex v0.1의 local plugin-style CLI flow를 검증합니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 보여줍니다.
 
 ## Example Mention
 
@@ -8,20 +8,14 @@
 @Rubricodex 우리 서비스에 POST /api/widgets endpoint를 추가해줘. 너무 무겁게 말고 기본 테스트까지.
 ```
 
-## Manual Harness Flow
+## Harness Flow
 
-1. Harness Plan Card를 작성합니다.
-   - Mode: `standard`
-   - Why this mode: endpoint 추가와 테스트가 필요하지만 결제, 권한, migration은 없습니다.
-   - Target: `POST /api/widgets`가 valid input을 받아 widget을 생성하고 `201` 응답을 반환합니다.
-   - Questions: 없음. fixture 범위에서 repo convention으로 충분합니다.
-   - Criteria: endpoint contract, input validation, data integrity, test coverage, maintainability
-   - Evidence: `npm test`
-   - Next action: taskpack implementation prompt 실행
-2. `.rubricodex/target.json`과 `.rubricodex/matrix.json`으로 성공 기준을 고정합니다.
-3. `.rubricodex/taskpacks/example-v0.1/implement.md`를 Codex app 작업 prompt로 사용합니다.
-4. 구현 후 `.rubricodex/taskpacks/example-v0.1/review-all.md`로 결과를 검토합니다.
-5. `.rubricodex/runs/example-v0.1/scorecard.json`과 `report.md`에 pass/fail/missing evidence를 기록합니다.
+1. `.rubricodex/intent/brief.json`에 bounded request를 고정합니다.
+2. `.rubricodex/matrix/evaluation-matrix.json`에 GQE-R-lite 기준을 고정합니다.
+3. `rubricodex goal compile --run-id example-v0.1`로 taskpack을 생성합니다.
+4. `rubricodex prompt lint --run-id example-v0.1`로 실행 prompt를 확인합니다.
+5. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
+6. `rubricodex score compute --run-id example-v0.1`와 `rubricodex report --run-id example-v0.1`로 scorecard/report/retune instruction을 생성합니다.
 
 ## Modes
 
@@ -36,6 +30,10 @@
 ## Run
 
 ```bash
+python3 -m rubricodex.cli --root examples/source-code-endpoint goal compile --run-id example-v0.1
+python3 -m rubricodex.cli --root examples/source-code-endpoint prompt lint --run-id example-v0.1
+python3 -m rubricodex.cli --root examples/source-code-endpoint score compute --run-id example-v0.1
+python3 -m rubricodex.cli --root examples/source-code-endpoint report --run-id example-v0.1
 npm test
 npm start
 ```

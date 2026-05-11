@@ -1,19 +1,16 @@
-# Rubricodex v0.1 Fixture Report
-
-Decision: pass
+# Rubricodex Report
 
 ## Summary
+- Decision: pass_with_warnings
+- Scoring model: counts-v0.1
+- Counts: pass=4, partial=1, missing=0, fail=0
 
-The source-code-endpoint fixture demonstrates the v0.1 manual `@Rubricodex` quality loop without app plugin or CLI automation. The example includes a target, matrix, taskpack, testable endpoint implementation, scorecard, and report.
+## Criteria
+- C-01 Endpoint contract: pass
+- C-02 Input validation: pass
+- C-03 Data integrity: pass
+- C-04 Test coverage: pass
+- C-05 Maintainability: partial
 
-## Evidence
-
-```bash
-npm test
-```
-
-## Result
-
-- Hard gates passed: endpoint_contract, input_validation
-- Missing evidence: none
-- Retune required: no
+## Next action
+Run the retune goal for the failed or partial criteria only.
