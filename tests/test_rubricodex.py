@@ -312,6 +312,14 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(validate_matrix(sample_matrix(mode="strict", count=6, hard_ids={1}), "strict"), [])
         self.assertTrue(validate_matrix(sample_matrix(mode="strict", count=5, hard_ids={1}), "strict"))
 
+    def test_matrix_rejects_unknown_declared_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = "nonsense"
+
+        issues = validate_matrix(matrix)
+
+        self.assertIn("$.mode", {issue.path for issue in issues})
+
     def test_plan_draft_auto_classifies_and_writes_taskpack(self) -> None:
         result = draft_harness(
             self.root,
@@ -348,6 +356,8 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(classify_mode("작은 버그 수정", "auto"), "quick")
         self.assertEqual(classify_mode("권한 migration을 안전하게 수정", "auto"), "strict")
         self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
+        self.assertEqual(classify_mode("review and fix auth bug", "auto"), "strict")
+        self.assertEqual(classify_mode("리뷰 반영해서 작은 버그 수정", "auto"), "quick")
         self.assertEqual(classify_mode("관리자 대시보드를 만들어줘", "auto"), "standard")
 
     def test_audit_draft_includes_audit_specific_criterion(self) -> None:
@@ -463,6 +473,18 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(draft_exit, 0)
         self.assertEqual(run_exit, 0)
         self.assertIn('"status": "pass"', stdout.getvalue())
+
+    def test_cli_matrix_validate_rejects_unknown_artifact_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = "nonsense"
+        matrix_file = self.root / "matrix.json"
+        write_json(matrix_file, matrix)
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(["matrix", "validate", "--file", str(matrix_file)])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("$.mode", stdout.getvalue())
 
     def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
         self.write_default_contract()

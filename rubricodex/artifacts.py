@@ -107,6 +107,27 @@ QUICK_KEYWORDS = {
     "수정",
 }
 
+CHANGE_INTENT_KEYWORDS = {
+    "add",
+    "build",
+    "change",
+    "create",
+    "fix",
+    "implement",
+    "modify",
+    "refactor",
+    "ship",
+    "update",
+    "개선",
+    "고쳐",
+    "구현",
+    "만들",
+    "반영",
+    "변경",
+    "수정",
+    "추가",
+}
+
 FORBIDDEN_KEYS = {
     "raw_transcript",
     "raw_chat_transcript",
@@ -390,7 +411,7 @@ def classify_mode(goal: str, requested_mode: str = "auto") -> str:
         return mode
 
     words = [word for word in goal.replace("\n", " ").split(" ") if word.strip()]
-    if _contains_any(goal, AUDIT_KEYWORDS):
+    if _contains_any(goal, AUDIT_KEYWORDS) and not _contains_any(goal, CHANGE_INTENT_KEYWORDS):
         return "audit"
     if _contains_any(goal, STRICT_KEYWORDS):
         return "strict"
@@ -692,9 +713,23 @@ def _is_non_empty(value: Any) -> bool:
     return value is not None
 
 
+def _resolve_validation_mode(data: dict[str, Any], mode: str | None, issues: list[ValidationIssue]) -> str:
+    valid = set(MODE_CRITERIA_RANGE)
+    declared = data.get("mode")
+    if declared is not None and declared not in valid:
+        issues.append(ValidationIssue("$.mode", f"mode must be one of {', '.join(MODE_CRITERIA_RANGE)}"))
+    if mode is not None and mode not in valid:
+        issues.append(ValidationIssue("$.mode", f"mode must be one of {', '.join(MODE_CRITERIA_RANGE)}"))
+    if isinstance(mode, str) and mode in valid:
+        return mode
+    if isinstance(declared, str) and declared in valid:
+        return declared
+    return DEFAULT_MODE
+
+
 def validate_brief(data: dict[str, Any], mode: str | None = None) -> list[ValidationIssue]:
-    active_mode = mode or data.get("mode") or DEFAULT_MODE
     issues = validate_forbidden_keys(data)
+    active_mode = _resolve_validation_mode(data, mode, issues)
     if data.get("artifact_type") != BRIEF_TYPE:
         issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {BRIEF_TYPE}"))
     blocks = data.get("blocks")
@@ -713,8 +748,8 @@ def validate_brief(data: dict[str, Any], mode: str | None = None) -> list[Valida
 
 
 def validate_matrix(data: dict[str, Any], mode: str | None = None) -> list[ValidationIssue]:
-    active_mode = mode or data.get("mode") or DEFAULT_MODE
     issues = validate_forbidden_keys(data)
+    active_mode = _resolve_validation_mode(data, mode, issues)
     if data.get("artifact_type") != MATRIX_TYPE:
         issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {MATRIX_TYPE}"))
     if data.get("method") != "gqe-r-lite":
