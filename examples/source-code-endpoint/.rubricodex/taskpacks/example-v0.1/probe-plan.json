@@ -1,0 +1,39 @@
+{
+  "artifact_type": "rubricodex.probe_plan",
+  "created_at": "2026-05-11T09:45:57Z",
+  "executor": "codex-cli-local",
+  "mode": "standard",
+  "parallel": 2,
+  "raw_output_stored": false,
+  "rubricodex_version": "0.1.0",
+  "run_id": "example-v0.1",
+  "schema_version": "rubricodex.v0.1",
+  "selected_probes": [
+    {
+      "criterion_id": "C-01",
+      "prompt_path": ".rubricodex/taskpacks/example-v0.1/probes/C-01.md",
+      "read_only": true,
+      "selection_reason": "hard_gate"
+    },
+    {
+      "criterion_id": "C-02",
+      "prompt_path": ".rubricodex/taskpacks/example-v0.1/probes/C-02.md",
+      "read_only": true,
+      "selection_reason": "hard_gate"
+    }
+  ],
+  "skipped_probes": [
+    {
+      "criterion_id": "C-03",
+      "skip_reason": "supporting criterion skipped by default selective policy"
+    },
+    {
+      "criterion_id": "C-04",
+      "skip_reason": "supporting criterion skipped by default selective policy"
+    },
+    {
+      "criterion_id": "C-05",
+      "skip_reason": "supporting criterion skipped by default selective policy"
+    }
+  ]
+}

@@ -12,5 +12,12 @@
 - C-04 Test coverage: pass
 - C-05 Maintainability: partial
 
+## Probes
+- C-01: probe_skipped
+- C-02: probe_skipped
+- C-03 skipped: supporting criterion skipped by default selective policy
+- C-04 skipped: supporting criterion skipped by default selective policy
+- C-05 skipped: supporting criterion skipped by default selective policy
+
 ## Next action
 Run the retune goal for the failed or partial criteria only.
