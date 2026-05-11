@@ -42,6 +42,7 @@ flowchart LR
 python3 -m rubricodex.cli init
 python3 -m rubricodex.cli goal compile --run-id example-v0.1
 python3 -m rubricodex.cli prompt lint --run-id example-v0.1
+python3 -m rubricodex.cli matrix lock --run-id example-v0.1
 python3 -m rubricodex.cli score compute --run-id example-v0.1
 python3 -m rubricodex.cli report --run-id example-v0.1
 ```
@@ -50,7 +51,7 @@ Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니
 
 ## v0.1 Fixture
 
-첫 v0.1 fixture는 [examples/source-code-endpoint](examples/source-code-endpoint)에 있습니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
+첫 v0.1 fixture는 [examples/source-code-endpoint](examples/source-code-endpoint)에 있습니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
 
 ## Product SSoT
 
