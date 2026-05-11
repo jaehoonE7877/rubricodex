@@ -95,8 +95,21 @@ def _artifact_mode(root: Path | str) -> str:
     return mode if isinstance(mode, str) and mode.strip() else DEFAULT_MODE
 
 
+def _matrix_arg_mode(args: argparse.Namespace) -> str | None:
+    matrix_file = getattr(args, "matrix", None)
+    if not matrix_file:
+        return None
+    try:
+        mode = read_json(matrix_file).get("mode")
+    except (ArtifactError, FileNotFoundError, json.JSONDecodeError):
+        return None
+    return mode if isinstance(mode, str) and mode.strip() else None
+
+
 def _followup_mode(args: argparse.Namespace) -> str:
-    return args.mode if args.mode_explicit else _artifact_mode(args.root)
+    if args.mode_explicit:
+        return args.mode
+    return _matrix_arg_mode(args) or _artifact_mode(args.root)
 
 
 def cmd_init(args: argparse.Namespace) -> int:

@@ -500,6 +500,33 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(run_exit, 0)
         self.assertIn('"status": "pass"', stdout.getvalue())
 
+    def test_cli_followup_commands_infer_explicit_matrix_file_mode(self) -> None:
+        write_json(intent_path(self.root), sample_brief(mode="quick"))
+        write_json(matrix_path(self.root), sample_matrix(mode="quick", count=3, hard_ids={1}))
+        standard_brief = self.root / "standard-brief.json"
+        standard_matrix = self.root / "standard-matrix.json"
+        write_json(standard_brief, sample_brief(mode="standard"))
+        write_json(standard_matrix, sample_matrix(mode="standard", count=5, hard_ids={1, 2}))
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "goal",
+                    "compile",
+                    "--run-id",
+                    "standard-alt",
+                    "--brief",
+                    str(standard_brief),
+                    "--matrix",
+                    str(standard_matrix),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"status": "pass"', stdout.getvalue())
+
     def test_cli_matrix_validate_rejects_unknown_artifact_mode(self) -> None:
         matrix = sample_matrix()
         matrix["mode"] = "nonsense"
