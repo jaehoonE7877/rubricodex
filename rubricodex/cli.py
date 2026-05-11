@@ -12,6 +12,7 @@ from .artifacts import (
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    draft_harness,
     import_app_session,
     init_project,
     lint_goal_file,
@@ -47,6 +48,81 @@ def _validation_result(kind: str, issues: list) -> dict:
     return _result("pass" if not issues else "fail", kind=kind, issues=[issue.as_dict() for issue in issues])
 
 
+def _global_mode(argv: list[str]) -> str | None:
+    command_names = {
+        "init",
+        "plan",
+        "intent",
+        "matrix",
+        "goal",
+        "prompt",
+        "evidence",
+        "score",
+        "report",
+        "run",
+        "probe",
+        "app",
+        "orchestrate",
+    }
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item == "--mode" and index + 1 < len(argv):
+            return argv[index + 1]
+        if item.startswith("--mode="):
+            return item.split("=", 1)[1]
+        if item == "--root":
+            index += 2
+            continue
+        if item.startswith("--root="):
+            index += 1
+            continue
+        if item in command_names:
+            break
+        index += 1
+    return None
+
+
+def _mode_option_present(argv: list[str]) -> bool:
+    return any(item == "--mode" or item.startswith("--mode=") for item in argv)
+
+
+def _plan_draft_mode_option_present(argv: list[str]) -> bool:
+    for index in range(len(argv) - 1):
+        if argv[index] == "plan" and argv[index + 1] == "draft":
+            draft_args = argv[index + 2 :]
+            return any(
+                item in {"--mode", "--plan-mode"} or item.startswith("--mode=") or item.startswith("--plan-mode=")
+                for item in draft_args
+            )
+    return False
+
+
+def _artifact_mode(root: Path | str) -> str:
+    try:
+        mode = read_json(matrix_path(root)).get("mode")
+    except (ArtifactError, FileNotFoundError, json.JSONDecodeError):
+        return DEFAULT_MODE
+    return mode if isinstance(mode, str) and mode.strip() else DEFAULT_MODE
+
+
+def _matrix_arg_mode(args: argparse.Namespace) -> str | None:
+    matrix_file = getattr(args, "matrix", None)
+    if not matrix_file:
+        return None
+    try:
+        mode = read_json(matrix_file).get("mode")
+    except (ArtifactError, FileNotFoundError, json.JSONDecodeError):
+        return None
+    return mode if isinstance(mode, str) and mode.strip() else None
+
+
+def _followup_mode(args: argparse.Namespace) -> str:
+    if args.mode_explicit:
+        return args.mode
+    return _matrix_arg_mode(args) or _artifact_mode(args.root)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     paths = init_project(args.root, mode=args.mode, executor=args.executor, force=args.force)
     _print_json(_result("pass", paths=[str(path) for path in paths]))
@@ -55,14 +131,14 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_intent_validate(args: argparse.Namespace) -> int:
     data = read_json(args.file or intent_path(args.root))
-    result = _validation_result("intent_brief", validate_brief(data, args.mode))
+    result = _validation_result("intent_brief", validate_brief(data, args.mode if args.mode_explicit else None))
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
 
 def cmd_matrix_validate(args: argparse.Namespace) -> int:
     data = read_json(args.file or matrix_path(args.root))
-    result = _validation_result("evaluation_matrix", validate_matrix(data, args.mode))
+    result = _validation_result("evaluation_matrix", validate_matrix(data, args.mode if args.mode_explicit else None))
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
@@ -71,7 +147,7 @@ def cmd_matrix_lock(args: argparse.Namespace) -> int:
     result = verify_matrix_lock(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         revision_reason=args.approve_revision,
         brief_file=args.brief,
         matrix_file=args.matrix,
@@ -81,11 +157,27 @@ def cmd_matrix_lock(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "pass" else 1
 
 
+def cmd_plan_draft(args: argparse.Namespace) -> int:
+    mode = args.plan_mode
+    if mode == "auto" and args.global_mode and not args.plan_mode_explicit:
+        mode = args.global_mode
+    result = draft_harness(
+        args.root,
+        args.run_id,
+        args.goal,
+        mode=mode,
+        task_kind=args.task_kind,
+        executor=args.executor,
+    )
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
+
+
 def cmd_goal_compile(args: argparse.Namespace) -> int:
     paths = compile_goal(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         executor=args.executor,
         brief_file=args.brief,
         matrix_file=args.matrix,
@@ -95,7 +187,7 @@ def cmd_goal_compile(args: argparse.Namespace) -> int:
 
 
 def cmd_prompt_lint(args: argparse.Namespace) -> int:
-    result = lint_goal_file(args.root, args.run_id, mode=args.mode, goal_file=args.file)
+    result = lint_goal_file(args.root, args.run_id, mode=_followup_mode(args), goal_file=args.file)
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
@@ -131,7 +223,7 @@ def cmd_run_local(args: argparse.Namespace) -> int:
     result = run_local(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         execute=args.execute,
         codex_bin=args.codex_bin,
         result_summary=args.summary,
@@ -146,7 +238,7 @@ def cmd_probe_plan(args: argparse.Namespace) -> int:
     result = plan_probes(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         criterion_ids=args.criterion_id,
         include_supporting=args.include_supporting,
         parallel=args.parallel,
@@ -159,7 +251,7 @@ def cmd_probe_run(args: argparse.Namespace) -> int:
     result = run_probes(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         parallel=args.parallel,
         execute=args.execute,
         codex_bin=args.codex_bin,
@@ -175,7 +267,7 @@ def cmd_app_session_import(args: argparse.Namespace) -> int:
 
 
 def cmd_app_collect(args: argparse.Namespace) -> int:
-    result = collect_app_artifacts(args.root, args.run_id, mode=args.mode)
+    result = collect_app_artifacts(args.root, args.run_id, mode=_followup_mode(args))
     _print_json(result)
     return 0
 
@@ -198,7 +290,7 @@ def cmd_orchestrate_run(args: argparse.Namespace) -> int:
     result = orchestrate_run(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         backend=args.backend,
         parallel=args.parallel,
         execute=args.execute,
@@ -229,6 +321,17 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--executor", default=DEFAULT_EXECUTOR)
     init.add_argument("--force", action="store_true")
     init.set_defaults(func=cmd_init)
+
+    plan = subparsers.add_parser("plan")
+    plan_sub = plan.add_subparsers(dest="plan_command", required=True)
+    plan_draft = plan_sub.add_parser("draft")
+    plan_draft.add_argument("--root", default=argparse.SUPPRESS, help="Project root containing .rubricodex")
+    plan_draft.add_argument("--run-id", required=True)
+    plan_draft.add_argument("--goal", required=True)
+    plan_draft.add_argument("--plan-mode", "--mode", dest="plan_mode", default="auto", help="auto, micro, quick, standard, strict, or audit")
+    plan_draft.add_argument("--task-kind", default="implementation")
+    plan_draft.add_argument("--executor", default=DEFAULT_EXECUTOR)
+    plan_draft.set_defaults(func=cmd_plan_draft)
 
     intent = subparsers.add_parser("intent")
     intent_sub = intent.add_subparsers(dest="intent_command", required=True)
@@ -369,7 +472,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    args.global_mode = _global_mode(raw_argv)
+    args.mode_explicit = _mode_option_present(raw_argv)
+    args.plan_mode_explicit = _plan_draft_mode_option_present(raw_argv)
     try:
         return args.func(args)
     except ArtifactError as error:

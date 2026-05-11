@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -25,9 +26,12 @@ from rubricodex.artifacts import (
     app_cards_path,
     app_collection_path,
     app_session_path,
+    assess_request_readiness,
+    classify_mode,
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    draft_harness,
     goal_lock_path,
     import_app_session,
     init_project,
@@ -129,7 +133,12 @@ def sample_matrix(mode: str = "standard", count: int = 5, hard_ids: set[int] | N
     }
 
 
-def sample_evidence(matrix: dict, statuses: dict[str, str] | None = None, scope_out_drift: str | None = None) -> dict:
+def sample_evidence(
+    matrix: dict,
+    statuses: dict[str, str] | None = None,
+    scope_out_drift: str | None = None,
+    run_id: str = "example-v0.1",
+) -> dict:
     statuses = statuses or {}
     items = []
     for item in matrix["criteria"]:
@@ -154,7 +163,7 @@ def sample_evidence(matrix: dict, statuses: dict[str, str] | None = None, scope_
         "rubricodex_version": "0.1.0",
         "created_at": "2026-05-11T00:00:00Z",
         "mode": matrix["mode"],
-        "run_id": "example-v0.1",
+        "run_id": run_id,
         "executor": "codex-cli-goal",
         "raw_output_stored": False,
         "evidence_items": items,
@@ -302,6 +311,301 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(validate_matrix(sample_matrix(mode="micro", count=3, hard_ids={1}), "micro"))
         self.assertEqual(validate_matrix(sample_matrix(mode="strict", count=6, hard_ids={1}), "strict"), [])
         self.assertTrue(validate_matrix(sample_matrix(mode="strict", count=5, hard_ids={1}), "strict"))
+
+    def test_matrix_rejects_unknown_declared_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = "nonsense"
+
+        issues = validate_matrix(matrix)
+
+        self.assertIn("$.mode", {issue.path for issue in issues})
+
+    def test_matrix_rejects_non_string_declared_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = ["standard"]
+
+        issues = validate_matrix(matrix, "standard")
+
+        self.assertIn("$.mode", {issue.path for issue in issues})
+
+    def test_plan_draft_auto_classifies_and_writes_taskpack(self) -> None:
+        result = draft_harness(
+            self.root,
+            "draft-strict",
+            "결제 권한 migration 위험을 고려해서 API endpoint를 수정하고 테스트로 검증해줘.",
+        )
+
+        brief = read_json(intent_path(self.root))
+        matrix = read_json(matrix_path(self.root))
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["mode"], "strict")
+        self.assertEqual(brief["request_readiness"]["max_score"], 6)
+        self.assertEqual(validate_brief(brief, "strict"), [])
+        self.assertEqual(validate_matrix(matrix, "strict"), [])
+        self.assertTrue((self.root / ".rubricodex/taskpacks/draft-strict/goal.md").is_file())
+        self.assertEqual(lint_goal_file(self.root, "draft-strict", mode="strict")["status"], "pass")
+
+    def test_plan_draft_rejects_empty_goal(self) -> None:
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(self.root, "empty", " ")
+
+        self.assertIn("goal must be non-empty", str(context.exception))
+
+    def test_plan_draft_rejects_unsafe_run_id(self) -> None:
+        for run_id in ("../escape", ""):
+            with self.subTest(run_id=run_id):
+                with self.assertRaises(ArtifactError) as context:
+                    draft_harness(self.root, run_id, "관리자 dashboard page를 만들고 test evidence를 남겨줘.")
+
+                self.assertIn("$.run_id", {issue.path for issue in context.exception.issues})
+        self.assertFalse((self.root / ".rubricodex" / "escape" / "goal.md").exists())
+        self.assertFalse((self.root / ".rubricodex" / "taskpacks" / "goal.md").exists())
+
+    def test_plan_draft_rejects_existing_locked_contract(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(self.root, "example-v1.0", "관리자 dashboard page를 만들고 test evidence를 남겨줘.")
+
+        self.assertIn("$.run_id", {issue.path for issue in context.exception.issues})
+        self.assertIn("example-v0.1", str(context.exception))
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "pass")
+        self.assertFalse((self.root / ".rubricodex" / "taskpacks" / "example-v1.0").exists())
+
+    def test_request_readiness_records_assumptions_without_raw_fields(self) -> None:
+        readiness = assess_request_readiness("대시보드를 만들어줘", "standard")
+
+        self.assertIn(readiness["status"], {"needs_assumption", "needs_clarification"})
+        self.assertTrue(readiness["assumptions"])
+        self.assertNotIn("raw_transcript", str(readiness))
+
+    def test_request_readiness_does_not_treat_sentence_period_as_context(self) -> None:
+        readiness = assess_request_readiness("Add an API.", "standard")
+
+        checks = {check["id"]: check for check in readiness["checks"]}
+        self.assertFalse(checks["context"]["passed"])
+
+    def test_request_readiness_accepts_file_or_path_context(self) -> None:
+        for goal in ("Update README.md evidence.", "Fix src/server.js endpoint."):
+            with self.subTest(goal=goal):
+                readiness = assess_request_readiness(goal, "standard")
+                checks = {check["id"]: check for check in readiness["checks"]}
+
+                self.assertTrue(checks["context"]["passed"])
+
+    def test_mode_classifier_uses_lowest_sufficient_mode(self) -> None:
+        self.assertEqual(classify_mode("오타 문구 수정", "auto"), "micro")
+        self.assertEqual(classify_mode("작은 버그 수정", "auto"), "quick")
+        self.assertEqual(classify_mode("권한 migration을 안전하게 수정", "auto"), "strict")
+        self.assertEqual(classify_mode("현재 diff review", "auto"), "audit")
+        self.assertEqual(classify_mode("Implement authentication middleware with tests", "auto"), "strict")
+        self.assertEqual(classify_mode("Fix user permissions bug", "auto"), "strict")
+        self.assertEqual(classify_mode("Implement payments dashboard", "auto"), "strict")
+        self.assertEqual(classify_mode("review and fix auth bug", "auto"), "strict")
+        self.assertEqual(classify_mode("Review and improve authentication middleware with tests", "auto"), "strict")
+        self.assertEqual(classify_mode("Review and improve dashboard UI with tests", "auto"), "standard")
+        self.assertEqual(classify_mode("review and delete old auth route", "auto"), "strict")
+        self.assertEqual(classify_mode("review and remove old route", "auto"), "strict")
+        self.assertEqual(classify_mode("보안 삭제 리뷰", "auto"), "strict")
+        self.assertEqual(classify_mode("리뷰 반영해서 작은 버그 수정", "auto"), "quick")
+        self.assertEqual(classify_mode("관리자 대시보드를 만들어줘", "auto"), "standard")
+
+    def test_mode_classifier_uses_word_boundaries_for_english_keywords(self) -> None:
+        self.assertEqual(classify_mode("Create copyright page", "auto"), "standard")
+        self.assertEqual(classify_mode("Add prefix handling", "auto"), "standard")
+        self.assertEqual(classify_mode("Preview page", "auto"), "standard")
+
+    def test_audit_draft_includes_audit_specific_criterion(self) -> None:
+        draft_harness(self.root, "audit-draft", "현재 diff review", mode="audit")
+
+        matrix = read_json(matrix_path(self.root))
+
+        self.assertIn("Audit objectivity", {criterion["name"] for criterion in matrix["criteria"]})
+
+    def test_v10_all_modes_draft_and_orchestrate(self) -> None:
+        mode_goals = {
+            "micro": "오타 문구 수정",
+            "quick": "작은 버그 수정",
+            "standard": "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            "strict": "결제 권한 migration 위험을 고려해서 API endpoint를 수정하고 test evidence를 남겨줘.",
+            "audit": "현재 diff를 review하고 findings report evidence를 남겨줘.",
+        }
+        for mode, goal in mode_goals.items():
+            with self.subTest(mode=mode):
+                root = self.root / mode
+                run_id = f"{mode}-fixture"
+                draft = draft_harness(root, run_id, goal, mode=mode)
+                matrix = read_json(matrix_path(root))
+                write_json(run_dir(root, run_id) / "evidence.json", sample_evidence(matrix, run_id=run_id))
+                result = orchestrate_run(root, run_id, mode=mode, parallel=1)
+                status = orchestrate_status(root, run_id)
+
+                self.assertEqual(draft["status"], "pass")
+                self.assertEqual(result["status"], "pass")
+                self.assertEqual(status["status"], "complete")
+                self.assertEqual(status["decision"], "pass")
+
+    def test_cli_plan_draft_command(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "cli-draft",
+                    "--mode",
+                    "quick",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"mode": "quick"', stdout.getvalue())
+        self.assertIn('"status": "pass"', stdout.getvalue())
+        self.assertTrue((self.root / ".rubricodex/taskpacks/cli-draft/goal.md").is_file())
+
+    def test_cli_plan_draft_honors_global_mode(self) -> None:
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with redirect_stdout(StringIO()) as stdout:
+                exit_code = cli_main(
+                    [
+                        "--root",
+                        "plan",
+                        "--mode",
+                        "strict",
+                        "plan",
+                        "draft",
+                        "--run-id",
+                        "global-mode-draft",
+                        "--goal",
+                        "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    ]
+                )
+        finally:
+            os.chdir(old_cwd)
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"mode": "strict"', stdout.getvalue())
+        matrix = read_json(matrix_path(self.root / "plan"))
+        self.assertEqual(len(matrix["criteria"]), 6)
+
+    def test_cli_plan_draft_explicit_auto_overrides_global_mode(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "--mode",
+                    "strict",
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "explicit-auto-draft",
+                    "--mode",
+                    "auto",
+                    "--goal",
+                    "작은 버그 수정",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"mode": "quick"', stdout.getvalue())
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(len(matrix["criteria"]), 3)
+
+    def test_cli_followup_commands_infer_drafted_mode(self) -> None:
+        with redirect_stdout(StringIO()):
+            draft_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "quick-draft",
+                    "--goal",
+                    "작은 버그 수정",
+                ]
+            )
+        matrix = read_json(matrix_path(self.root))
+        write_json(run_dir(self.root, "quick-draft") / "evidence.json", sample_evidence(matrix, run_id="quick-draft"))
+
+        with redirect_stdout(StringIO()) as stdout:
+            run_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "orchestrate",
+                    "run",
+                    "--run-id",
+                    "quick-draft",
+                    "--parallel",
+                    "1",
+                ]
+            )
+
+        self.assertEqual(draft_exit, 0)
+        self.assertEqual(run_exit, 0)
+        self.assertIn('"status": "pass"', stdout.getvalue())
+
+    def test_cli_followup_commands_infer_explicit_matrix_file_mode(self) -> None:
+        write_json(intent_path(self.root), sample_brief(mode="quick"))
+        write_json(matrix_path(self.root), sample_matrix(mode="quick", count=3, hard_ids={1}))
+        standard_brief = self.root / "standard-brief.json"
+        standard_matrix = self.root / "standard-matrix.json"
+        write_json(standard_brief, sample_brief(mode="standard"))
+        write_json(standard_matrix, sample_matrix(mode="standard", count=5, hard_ids={1, 2}))
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "goal",
+                    "compile",
+                    "--run-id",
+                    "standard-alt",
+                    "--brief",
+                    str(standard_brief),
+                    "--matrix",
+                    str(standard_matrix),
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"status": "pass"', stdout.getvalue())
+
+    def test_cli_matrix_validate_rejects_unknown_artifact_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = "nonsense"
+        matrix_file = self.root / "matrix.json"
+        write_json(matrix_file, matrix)
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(["matrix", "validate", "--file", str(matrix_file)])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("$.mode", stdout.getvalue())
+
+    def test_cli_matrix_validate_rejects_non_string_artifact_mode(self) -> None:
+        matrix = sample_matrix()
+        matrix["mode"] = ["standard"]
+        matrix_file = self.root / "matrix.json"
+        write_json(matrix_file, matrix)
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(["matrix", "validate", "--mode", "standard", "--file", str(matrix_file)])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("$.mode", stdout.getvalue())
+        self.assertNotIn("Traceback", stdout.getvalue())
 
     def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
         self.write_default_contract()

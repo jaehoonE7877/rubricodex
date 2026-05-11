@@ -40,6 +40,12 @@ flowchart LR
 
 ```bash
 python3 -m rubricodex.cli init
+python3 -m rubricodex.cli plan draft --run-id example-v1.0 --goal "관리자 dashboard page를 만들고 test evidence를 남겨줘."
+```
+
+Lower-level phase commands can still operate on an existing fixture run:
+
+```bash
 python3 -m rubricodex.cli goal compile --run-id example-v0.1
 python3 -m rubricodex.cli prompt lint --run-id example-v0.1
 python3 -m rubricodex.cli matrix lock --run-id example-v0.1
@@ -51,6 +57,8 @@ python3 -m rubricodex.cli report --run-id example-v0.1
 ```
 
 Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. App-first 흐름은 `rubricodex app session import`, `rubricodex app collect`, `rubricodex orchestrate run`, `rubricodex orchestrate status`로 같은 artifact를 검증합니다. 로컬 runner는 기본적으로 dry-run handoff만 기록하며, 직접 Codex CLI 실행은 `--execute`로 명시할 때만 시도합니다. `report`는 실패 이유와 `retune_goal.md`를 만들고, 이미 pass한 기준은 재작업 대상에서 제외합니다.
+
+v1.0 흐름은 `rubricodex plan draft`로 자연어 목표를 readiness, intent brief, evaluation matrix, `goal.md`, prompt lint, matrix lock까지 압축한 뒤 기존 app/CLI artifact 흐름에 연결합니다.
 
 ## Fixture
 

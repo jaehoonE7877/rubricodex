@@ -21,6 +21,13 @@
 9. `rubricodex orchestrate run --run-id example-v0.1 --parallel 2`로 local handoff, probes, scorecard, report, retune, app collection을 현재 evidence 기준으로 갱신합니다.
 10. `rubricodex orchestrate status --run-id example-v0.1`와 `rubricodex app collect --run-id example-v0.1`로 app/local artifact가 같은 report와 retune instruction을 참조하는지 확인합니다. `retune_goal.md`는 failed/partial/missing_evidence 기준만 다시 시도하고 pass 기준은 보존 목록으로 보호합니다.
 
+v1.0 natural-language start는 잠긴 v0.1 fixture를 보존하기 위해 fresh root에서 실행합니다:
+
+```bash
+mkdir -p /tmp/rubricodex-source-code-endpoint-v1
+python3 -m rubricodex.cli --root /tmp/rubricodex-source-code-endpoint-v1 plan draft --run-id example-v1.0 --goal "Add a POST /api/widgets endpoint with tests and summarized evidence."
+```
+
 ## Modes
 
 | Mode | v0.1 expected behavior |
