@@ -28,6 +28,7 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 10. After implementation, save summarized evidence in `.rubricodex/runs/<run-id>/evidence.json`.
 11. Run `rubricodex score compute --run-id <run-id>`.
 12. Run `rubricodex report --run-id <run-id>` and use `retune_goal.md` only for failed, partial, or missing criteria.
+13. Preserve pass criteria listed in the retune `Exclude` section unless the user explicitly approves a scope change.
 
 ## Artifact Contract
 
@@ -43,6 +44,12 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - Scorecard: `.rubricodex/runs/<run_id>/scorecard.json`
 - Report: `.rubricodex/runs/<run_id>/report.md`
 - Retune instruction: `.rubricodex/runs/<run_id>/retune_goal.md`
+
+## App Actions
+
+- `retune_failed_criteria`: run the generated retune goal for listed criteria only.
+- `review_current_diff`: inspect current changes before touching preserved pass criteria.
+- `mark_manual_evidence`: attach summarized evidence without raw command output.
 
 ## Score Model
 
