@@ -44,6 +44,8 @@ python3 -m rubricodex.cli goal compile --run-id example-v0.1
 python3 -m rubricodex.cli prompt lint --run-id example-v0.1
 python3 -m rubricodex.cli matrix lock --run-id example-v0.1
 python3 -m rubricodex.cli run local --run-id example-v0.1
+python3 -m rubricodex.cli probe plan --run-id example-v0.1
+python3 -m rubricodex.cli probe run --run-id example-v0.1 --parallel 2
 python3 -m rubricodex.cli score compute --run-id example-v0.1
 python3 -m rubricodex.cli report --run-id example-v0.1
 ```
@@ -52,7 +54,7 @@ Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니
 
 ## Fixture
 
-[examples/source-code-endpoint](examples/source-code-endpoint)는 `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
+[examples/source-code-endpoint](examples/source-code-endpoint)는 `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `probe-plan.json`, probe results, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
 
 ## Product SSoT
 
