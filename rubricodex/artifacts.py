@@ -977,7 +977,8 @@ def validate_probe_result(data: dict[str, Any]) -> list[ValidationIssue]:
 
 def _is_safe_path_segment(value: str) -> bool:
     return (
-        value == value.strip()
+        bool(value.strip())
+        and value == value.strip()
         and value not in {".", ".."}
         and "/" not in value
         and "\\" not in value

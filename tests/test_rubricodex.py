@@ -353,11 +353,14 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("goal must be non-empty", str(context.exception))
 
     def test_plan_draft_rejects_unsafe_run_id(self) -> None:
-        with self.assertRaises(ArtifactError) as context:
-            draft_harness(self.root, "../escape", "관리자 dashboard page를 만들고 test evidence를 남겨줘.")
+        for run_id in ("../escape", ""):
+            with self.subTest(run_id=run_id):
+                with self.assertRaises(ArtifactError) as context:
+                    draft_harness(self.root, run_id, "관리자 dashboard page를 만들고 test evidence를 남겨줘.")
 
-        self.assertIn("$.run_id", {issue.path for issue in context.exception.issues})
+                self.assertIn("$.run_id", {issue.path for issue in context.exception.issues})
         self.assertFalse((self.root / ".rubricodex" / "escape" / "goal.md").exists())
+        self.assertFalse((self.root / ".rubricodex" / "taskpacks" / "goal.md").exists())
 
     def test_request_readiness_records_assumptions_without_raw_fields(self) -> None:
         readiness = assess_request_readiness("대시보드를 만들어줘", "standard")
