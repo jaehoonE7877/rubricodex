@@ -645,6 +645,31 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["steps"][-1], {"name": "app_collect", "status": "fail"})
 
+    def test_orchestrate_run_fails_when_probe_execution_fails(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        counter = self.root / "fake-codex-count"
+        fake_codex = self.root / "fake-codex"
+        fake_codex.write_text(
+            "#!/bin/sh\n"
+            f"count_file='{counter}'\n"
+            "count=0\n"
+            "[ -f \"$count_file\" ] && count=$(cat \"$count_file\")\n"
+            "count=$((count + 1))\n"
+            "echo \"$count\" > \"$count_file\"\n"
+            "[ \"$count\" -eq 1 ] && exit 0\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        fake_codex.chmod(0o755)
+
+        result = orchestrate_run(self.root, "example-v0.1", execute=True, codex_bin=str(fake_codex))
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn({"name": "probe_run", "status": "fail"}, result["steps"])
+
     def test_cli_app_and_orchestrate_commands(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")

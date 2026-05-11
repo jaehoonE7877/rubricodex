@@ -1765,6 +1765,7 @@ def orchestrate_run(
                 codex_bin=codex_bin,
             )
             steps.append({"name": "probe_run", "status": probe_run["status"]})
+            probe_failed = probe_run["status"] != "pass"
             scorecard = compute_scorecard(root_path, run_id)
             steps.append({"name": "score_compute", "status": "pass"})
             write_report(root_path, run_id)
@@ -1783,7 +1784,7 @@ def orchestrate_run(
                     steps.append({"name": "app_collect", "status": "skipped" if no_session else "fail"})
                     app_collect_failed = not no_session
 
-            if app_collect_failed:
+            if probe_failed or app_collect_failed:
                 status = "fail"
             elif scorecard["decision"] == "pass":
                 status = "pass"
