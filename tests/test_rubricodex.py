@@ -16,6 +16,7 @@ from rubricodex.artifacts import (
     SCORECARD_TYPE,
     compile_goal,
     compute_scorecard,
+    goal_lock_path,
     init_project,
     intent_path,
     lint_goal_file,
@@ -25,6 +26,7 @@ from rubricodex.artifacts import (
     validate_brief,
     validate_evidence,
     validate_matrix,
+    verify_matrix_lock,
     validate_scorecard,
     write_json,
     write_report,
@@ -220,6 +222,8 @@ class RubricodexContractTests(unittest.TestCase):
         for path in paths.values():
             self.assertTrue(path.is_file())
         self.assertIn("brief_sha256", read_json(paths["lock"]))
+        self.assertIn("guidance_sha256", read_json(paths["lock"]))
+        self.assertIn("locked_criteria", read_json(paths["lock"]))
 
     def test_goal_compile_does_not_use_target_json(self) -> None:
         self.write_default_contract()
@@ -227,6 +231,86 @@ class RubricodexContractTests(unittest.TestCase):
         paths = compile_goal(self.root, "example-v0.1")
         adapter = read_json(paths["adapter_input"])
         self.assertNotIn("target.json", str(adapter))
+
+    def test_matrix_lock_passes_when_unchanged(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        result = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["issues"], [])
+
+    def test_matrix_lock_detects_deleted_criterion(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        matrix["criteria"] = matrix["criteria"][1:]
+        write_json(matrix_path(self.root), matrix)
+        result = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("criterion was removed", str(result["issues"]))
+
+    def test_matrix_lock_detects_hard_gate_weakening(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        matrix["criteria"][0]["hard_gate"] = False
+        write_json(matrix_path(self.root), matrix)
+        result = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("hard gate was weakened", str(result["issues"]))
+
+    def test_matrix_lock_detects_evidence_required_removal(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][0]["evidence_required"].append("Second required evidence")
+        self.write_default_contract(matrix=matrix)
+        compile_goal(self.root, "example-v0.1")
+        matrix["criteria"][0]["evidence_required"] = matrix["criteria"][0]["evidence_required"][:1]
+        write_json(matrix_path(self.root), matrix)
+        result = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("evidence_required was removed", str(result["issues"]))
+
+    def test_matrix_lock_detects_scope_drift_standard(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        brief = sample_brief()
+        brief["blocks"]["scope_in"].append("pagination")
+        write_json(intent_path(self.root), brief)
+        result = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("scope changed", str(result["issues"]))
+
+    def test_matrix_lock_warns_for_scope_drift_micro(self) -> None:
+        self.write_default_contract(matrix=sample_matrix(mode="micro", count=1, hard_ids={1}))
+        write_json(intent_path(self.root), sample_brief(mode="micro"))
+        compile_goal(self.root, "example-v0.1", mode="micro")
+        brief = sample_brief(mode="micro")
+        brief["blocks"]["scope_in"].append("copy tweak")
+        write_json(intent_path(self.root), brief)
+        result = verify_matrix_lock(self.root, "example-v0.1", mode="micro")
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("warning", str(result["issues"]))
+
+    def test_matrix_lock_approved_safe_revision_writes_new_lock(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        old_lock = read_json(goal_lock_path(self.root, "example-v0.1"))
+        matrix["criteria"].append(criterion(6))
+        write_json(matrix_path(self.root), matrix)
+
+        failed = verify_matrix_lock(self.root, "example-v0.1")
+        self.assertEqual(failed["status"], "fail")
+
+        goal = self.root / ".rubricodex" / "taskpacks" / "example-v0.1" / "goal.md"
+        goal.write_text(
+            goal.read_text(encoding="utf-8")
+            + "- C-06 (supporting): Does criterion 6 have summarized evidence? Evidence: Evidence summary for C-06\n",
+            encoding="utf-8",
+        )
+        approved = verify_matrix_lock(self.root, "example-v0.1", revision_reason="Add report quality criterion.")
+        self.assertEqual(approved["status"], "pass")
+        self.assertTrue(approved["revision_approved"])
+        new_lock = read_json(goal_lock_path(self.root, "example-v0.1"))
+        self.assertNotEqual(old_lock["matrix_sha256"], new_lock["matrix_sha256"])
+        self.assertEqual(new_lock["revision"]["reason"], "Add report quality criterion.")
 
     def test_goal_md_contains_required_sections(self) -> None:
         self.write_default_contract()
