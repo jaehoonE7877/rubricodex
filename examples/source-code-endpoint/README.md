@@ -1,6 +1,6 @@
 # Source Code Endpoint Fixture
 
-이 fixture는 Rubricodex의 local plugin-style CLI flow를 검증합니다. `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `probe-plan.json`, probe results, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 보여줍니다.
+이 fixture는 Rubricodex의 app-first/local CLI flow를 검증합니다. `app-session.json`, `cards.json`, `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `probe-plan.json`, probe results, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 보여줍니다.
 
 ## Example Mention
 
@@ -12,14 +12,14 @@
 
 1. `.rubricodex/intent/brief.json`에 bounded request를 고정합니다.
 2. `.rubricodex/matrix/evaluation-matrix.json`에 GQE-R-lite 기준을 고정합니다.
-3. `rubricodex goal compile --run-id example-v0.1`로 taskpack을 생성합니다.
-4. `rubricodex prompt lint --run-id example-v0.1`로 실행 prompt를 확인합니다.
-5. `rubricodex matrix lock --run-id example-v0.1`로 기준 drift를 확인합니다.
-6. `rubricodex run local --run-id example-v0.1`로 Codex CLI handoff manifest를 생성합니다.
-7. `rubricodex probe plan --run-id example-v0.1`로 필요한 read-only probe만 선택합니다.
-8. `rubricodex probe run --run-id example-v0.1 --parallel 2`로 probe result를 normalize합니다.
+3. `.rubricodex/app/sessions/example-session/app-session.json`과 `cards.json`은 Codex app 표면이 넘겨야 할 요약 입력과 UI 카드 참조를 보여줍니다.
+4. `rubricodex app session import --from .../app-session.json`로 app session을 run artifact에 연결합니다.
+5. `rubricodex goal compile --run-id example-v0.1`로 taskpack을 생성합니다.
+6. `rubricodex prompt lint --run-id example-v0.1`로 실행 prompt를 확인합니다.
+7. `rubricodex matrix lock --run-id example-v0.1`로 기준 drift를 확인합니다.
+8. `rubricodex orchestrate run --run-id example-v0.1 --parallel 2`로 local handoff, probes, scorecard, report, retune, app collection을 한 번에 갱신합니다.
 9. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
-10. `rubricodex score compute --run-id example-v0.1`와 `rubricodex report --run-id example-v0.1`로 scorecard/report/retune instruction을 생성합니다. `retune_goal.md`는 failed/partial/missing_evidence 기준만 다시 시도하고 pass 기준은 보존 목록으로 보호합니다.
+10. `rubricodex orchestrate status --run-id example-v0.1`와 `rubricodex app collect --run-id example-v0.1`로 app/local artifact가 같은 report와 retune instruction을 참조하는지 확인합니다. `retune_goal.md`는 failed/partial/missing_evidence 기준만 다시 시도하고 pass 기준은 보존 목록으로 보호합니다.
 
 ## Modes
 
@@ -37,11 +37,10 @@
 python3 -m rubricodex.cli --root examples/source-code-endpoint goal compile --run-id example-v0.1
 python3 -m rubricodex.cli --root examples/source-code-endpoint prompt lint --run-id example-v0.1
 python3 -m rubricodex.cli --root examples/source-code-endpoint matrix lock --run-id example-v0.1
-python3 -m rubricodex.cli --root examples/source-code-endpoint run local --run-id example-v0.1
-python3 -m rubricodex.cli --root examples/source-code-endpoint probe plan --run-id example-v0.1 --parallel 2
-python3 -m rubricodex.cli --root examples/source-code-endpoint probe run --run-id example-v0.1 --parallel 2
-python3 -m rubricodex.cli --root examples/source-code-endpoint score compute --run-id example-v0.1
-python3 -m rubricodex.cli --root examples/source-code-endpoint report --run-id example-v0.1
+python3 -m rubricodex.cli --root examples/source-code-endpoint app session import --from examples/source-code-endpoint/.rubricodex/app/sessions/example-session/app-session.json
+python3 -m rubricodex.cli --root examples/source-code-endpoint orchestrate run --run-id example-v0.1 --parallel 2
+python3 -m rubricodex.cli --root examples/source-code-endpoint orchestrate status --run-id example-v0.1
+python3 -m rubricodex.cli --root examples/source-code-endpoint app collect --run-id example-v0.1
 npm test
 npm start
 ```

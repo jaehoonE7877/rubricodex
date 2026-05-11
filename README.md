@@ -50,11 +50,11 @@ python3 -m rubricodex.cli score compute --run-id example-v0.1
 python3 -m rubricodex.cli report --run-id example-v0.1
 ```
 
-Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. 로컬 runner는 기본적으로 dry-run handoff만 기록하며, 직접 Codex CLI 실행은 `--execute`로 명시할 때만 시도합니다. `report`는 실패 이유와 `retune_goal.md`를 만들고, 이미 pass한 기준은 재작업 대상에서 제외합니다.
+Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. App-first 흐름은 `rubricodex app session import`, `rubricodex app collect`, `rubricodex orchestrate run`, `rubricodex orchestrate status`로 같은 artifact를 검증합니다. 로컬 runner는 기본적으로 dry-run handoff만 기록하며, 직접 Codex CLI 실행은 `--execute`로 명시할 때만 시도합니다. `report`는 실패 이유와 `retune_goal.md`를 만들고, 이미 pass한 기준은 재작업 대상에서 제외합니다.
 
 ## Fixture
 
-[examples/source-code-endpoint](examples/source-code-endpoint)는 `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `probe-plan.json`, probe results, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
+[examples/source-code-endpoint](examples/source-code-endpoint)는 app session, `brief.json`, `evaluation-matrix.json`, `goal.md`, `goal.lock.json`, `run-manifest.json`, `probe-plan.json`, probe results, `evidence.json`, `scorecard.json`, `report.md`, `retune_goal.md`가 한 흐름으로 이어지는지 검증합니다.
 
 ## Product SSoT
 
