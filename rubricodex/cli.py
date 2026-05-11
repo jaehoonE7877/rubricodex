@@ -64,17 +64,39 @@ def _global_mode(argv: list[str]) -> str | None:
         "app",
         "orchestrate",
     }
-    before_command = []
-    for item in argv:
-        if item in command_names:
-            break
-        before_command.append(item)
-    for index, item in enumerate(before_command):
-        if item == "--mode" and index + 1 < len(before_command):
-            return before_command[index + 1]
+    index = 0
+    while index < len(argv):
+        item = argv[index]
+        if item == "--mode" and index + 1 < len(argv):
+            return argv[index + 1]
         if item.startswith("--mode="):
             return item.split("=", 1)[1]
+        if item == "--root":
+            index += 2
+            continue
+        if item.startswith("--root="):
+            index += 1
+            continue
+        if item in command_names:
+            break
+        index += 1
     return None
+
+
+def _mode_option_present(argv: list[str]) -> bool:
+    return any(item == "--mode" or item.startswith("--mode=") for item in argv)
+
+
+def _artifact_mode(root: Path | str) -> str:
+    try:
+        mode = read_json(matrix_path(root)).get("mode")
+    except (ArtifactError, FileNotFoundError, json.JSONDecodeError):
+        return DEFAULT_MODE
+    return mode if isinstance(mode, str) and mode.strip() else DEFAULT_MODE
+
+
+def _followup_mode(args: argparse.Namespace) -> str:
+    return args.mode if args.mode_explicit else _artifact_mode(args.root)
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -85,14 +107,14 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_intent_validate(args: argparse.Namespace) -> int:
     data = read_json(args.file or intent_path(args.root))
-    result = _validation_result("intent_brief", validate_brief(data, args.mode))
+    result = _validation_result("intent_brief", validate_brief(data, args.mode if args.mode_explicit else None))
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
 
 def cmd_matrix_validate(args: argparse.Namespace) -> int:
     data = read_json(args.file or matrix_path(args.root))
-    result = _validation_result("evaluation_matrix", validate_matrix(data, args.mode))
+    result = _validation_result("evaluation_matrix", validate_matrix(data, args.mode if args.mode_explicit else None))
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
@@ -101,7 +123,7 @@ def cmd_matrix_lock(args: argparse.Namespace) -> int:
     result = verify_matrix_lock(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         revision_reason=args.approve_revision,
         brief_file=args.brief,
         matrix_file=args.matrix,
@@ -131,7 +153,7 @@ def cmd_goal_compile(args: argparse.Namespace) -> int:
     paths = compile_goal(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         executor=args.executor,
         brief_file=args.brief,
         matrix_file=args.matrix,
@@ -141,7 +163,7 @@ def cmd_goal_compile(args: argparse.Namespace) -> int:
 
 
 def cmd_prompt_lint(args: argparse.Namespace) -> int:
-    result = lint_goal_file(args.root, args.run_id, mode=args.mode, goal_file=args.file)
+    result = lint_goal_file(args.root, args.run_id, mode=_followup_mode(args), goal_file=args.file)
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
 
@@ -177,7 +199,7 @@ def cmd_run_local(args: argparse.Namespace) -> int:
     result = run_local(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         execute=args.execute,
         codex_bin=args.codex_bin,
         result_summary=args.summary,
@@ -192,7 +214,7 @@ def cmd_probe_plan(args: argparse.Namespace) -> int:
     result = plan_probes(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         criterion_ids=args.criterion_id,
         include_supporting=args.include_supporting,
         parallel=args.parallel,
@@ -205,7 +227,7 @@ def cmd_probe_run(args: argparse.Namespace) -> int:
     result = run_probes(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         parallel=args.parallel,
         execute=args.execute,
         codex_bin=args.codex_bin,
@@ -221,7 +243,7 @@ def cmd_app_session_import(args: argparse.Namespace) -> int:
 
 
 def cmd_app_collect(args: argparse.Namespace) -> int:
-    result = collect_app_artifacts(args.root, args.run_id, mode=args.mode)
+    result = collect_app_artifacts(args.root, args.run_id, mode=_followup_mode(args))
     _print_json(result)
     return 0
 
@@ -244,7 +266,7 @@ def cmd_orchestrate_run(args: argparse.Namespace) -> int:
     result = orchestrate_run(
         args.root,
         args.run_id,
-        mode=args.mode,
+        mode=_followup_mode(args),
         backend=args.backend,
         parallel=args.parallel,
         execute=args.execute,
@@ -429,6 +451,7 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(raw_argv)
     args.global_mode = _global_mode(raw_argv)
+    args.mode_explicit = _mode_option_present(raw_argv)
     try:
         return args.func(args)
     except ArtifactError as error:

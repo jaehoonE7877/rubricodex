@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import unittest
@@ -402,26 +403,66 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue((self.root / ".rubricodex/taskpacks/cli-draft/goal.md").is_file())
 
     def test_cli_plan_draft_honors_global_mode(self) -> None:
-        with redirect_stdout(StringIO()) as stdout:
-            exit_code = cli_main(
-                [
-                    "--root",
-                    str(self.root),
-                    "--mode",
-                    "strict",
-                    "plan",
-                    "draft",
-                    "--run-id",
-                    "global-mode-draft",
-                    "--goal",
-                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
-                ]
-            )
+        old_cwd = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with redirect_stdout(StringIO()) as stdout:
+                exit_code = cli_main(
+                    [
+                        "--root",
+                        "plan",
+                        "--mode",
+                        "strict",
+                        "plan",
+                        "draft",
+                        "--run-id",
+                        "global-mode-draft",
+                        "--goal",
+                        "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    ]
+                )
+        finally:
+            os.chdir(old_cwd)
 
         self.assertEqual(exit_code, 0)
         self.assertIn('"mode": "strict"', stdout.getvalue())
-        matrix = read_json(matrix_path(self.root))
+        matrix = read_json(matrix_path(self.root / "plan"))
         self.assertEqual(len(matrix["criteria"]), 6)
+
+    def test_cli_followup_commands_infer_drafted_mode(self) -> None:
+        with redirect_stdout(StringIO()):
+            draft_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "quick-draft",
+                    "--goal",
+                    "작은 버그 수정",
+                ]
+            )
+        matrix = read_json(matrix_path(self.root))
+        write_json(run_dir(self.root, "quick-draft") / "evidence.json", sample_evidence(matrix, run_id="quick-draft"))
+
+        with redirect_stdout(StringIO()) as stdout:
+            run_exit = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "orchestrate",
+                    "run",
+                    "--run-id",
+                    "quick-draft",
+                    "--parallel",
+                    "1",
+                ]
+            )
+
+        self.assertEqual(draft_exit, 0)
+        self.assertEqual(run_exit, 0)
+        self.assertIn('"status": "pass"', stdout.getvalue())
 
     def test_goal_compile_writes_adapter_input_goal_and_lock(self) -> None:
         self.write_default_contract()
