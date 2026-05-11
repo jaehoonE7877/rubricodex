@@ -77,6 +77,7 @@ STATUS_ORDER = {
     "fail": 3,
 }
 
+RETUNE_STATUSES = {"partial", "missing_evidence", "fail"}
 LIGHT_LOCK_MODES = {"micro", "quick"}
 
 
@@ -1198,6 +1199,26 @@ def run_probes(
     }
 
 
+def _criterion_reason(criterion: dict[str, Any], status: str, items: list[dict[str, Any]]) -> str:
+    if not items:
+        reason = "No summarized evidence item was recorded for this criterion."
+    else:
+        summaries = "; ".join(str(item["summary"]) for item in items if str(item.get("summary", "")).strip())
+        if status == "pass":
+            reason = "Summarized evidence satisfies the criterion."
+        elif status == "partial":
+            reason = "Evidence is present but incomplete."
+        elif status == "missing_evidence":
+            reason = "Required evidence is missing or explicitly marked missing."
+        else:
+            reason = "Evidence indicates the criterion failed."
+        if summaries:
+            reason = f"{reason} Evidence summary: {summaries}"
+    if criterion.get("hard_gate") and status != "pass":
+        reason = f"Hard gate blocked. {reason}"
+    return reason
+
+
 def compute_scorecard(
     root: Path | str,
     run_id: str,
@@ -1249,6 +1270,12 @@ def compute_scorecard(
                     for item in items
                     for ref in item.get("artifact_refs", [])
                 ],
+                "evidence_summaries": [
+                    item["summary"]
+                    for item in items
+                    if isinstance(item.get("summary"), str) and item["summary"].strip()
+                ],
+                "reason": _criterion_reason(criterion, status, items),
                 "retune_hint": criterion["retune_hint"],
             }
         )
@@ -1280,6 +1307,11 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
     root_path = Path(root)
     scorecard = read_json(run_dir(root_path, run_id) / "scorecard.json")
     assert_valid(validate_scorecard(scorecard))
+    retune_results = [result for result in scorecard["results"] if result["status"] in RETUNE_STATUSES]
+    passed_results = [result for result in scorecard["results"] if result["status"] == "pass"]
+    hard_gate_results = [result for result in retune_results if result.get("hard_gate")]
+    retune_ids = ", ".join(result["criterion_id"] for result in retune_results) or "none"
+    passed_ids = ", ".join(result["criterion_id"] for result in passed_results) or "none"
     report_lines = [
         "# Rubricodex Report",
         "",
@@ -1287,14 +1319,29 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
         f"- Decision: {scorecard['decision']}",
         f"- Scoring model: {scorecard['scoring_model']}",
         f"- Counts: pass={scorecard['counts']['pass']}, partial={scorecard['counts']['partial']}, missing={scorecard['counts']['missing_evidence']}, fail={scorecard['counts']['fail']}",
-        "",
-        "## Criteria",
+        f"- Retune targets: {retune_ids}",
+        f"- Preserved pass criteria: {passed_ids}",
     ]
-    retune_results = []
+    if hard_gate_results:
+        report_lines.append(
+            "- Hard gate alert: "
+            + "; ".join(f"{result['criterion_id']} {result['name']} is {result['status']}" for result in hard_gate_results)
+        )
+    else:
+        report_lines.append("- Hard gate alert: none")
+    report_lines.extend(
+        [
+            "",
+            "## Criteria",
+        ]
+    )
     for result in scorecard["results"]:
-        report_lines.append(f"- {result['criterion_id']} {result['name']}: {result['status']}")
-        if result["status"] != "pass":
-            retune_results.append(result)
+        line = f"- {result['criterion_id']} {result['name']}: {result['status']}. Reason: {result.get('reason', 'No reason recorded.')}"
+        if result.get("evidence_refs"):
+            line += " Evidence: " + ", ".join(str(ref) for ref in result["evidence_refs"])
+        if result["status"] in RETUNE_STATUSES:
+            line += f" Retune: {result['retune_hint']}"
+        report_lines.append(line)
 
     probe_plan_file = probe_plan_path(root_path, run_id)
     if probe_plan_file.exists():
@@ -1318,35 +1365,88 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
 
     report_lines.extend(["", "## Next action"])
     if retune_results:
-        report_lines.append("Run the retune goal for the failed or partial criteria only.")
+        report_lines.append("Run the retune goal for failed, partial, or missing-evidence criteria only.")
     else:
         report_lines.append("No retune instruction required.")
+    report_lines.extend(
+        [
+            "",
+            "## App actions",
+            "- retune_failed_criteria: use retune_goal.md for the listed targets only.",
+            "- review_current_diff: inspect the current implementation before changing preserved pass criteria.",
+            "- mark_manual_evidence: attach summarized evidence without storing raw output.",
+        ]
+    )
     report_path = write_text(run_dir(root_path, run_id) / "report.md", "\n".join(report_lines) + "\n")
 
     retune_lines = [
-        "/goal Retune only the criteria listed below.",
+        f"/goal Retune Rubricodex run {run_id} by fixing only the listed criteria.",
         "",
-        "## Failed or partial criteria",
+        "## Purpose",
+        "Fix only criteria marked failed, partial, or missing_evidence in the current Rubricodex scorecard.",
+        "",
+        "## Desired outcome",
+        "The listed criteria gain summarized evidence while criteria already marked pass remain unchanged.",
+        "",
+        "## Deliverable",
+        "A small patch or evidence update plus refreshed evidence, scorecard, report, and retune artifacts.",
+        "",
+        "## Context",
+        f"- Run id: {run_id}",
+        f"- Current decision: {scorecard['decision']}",
+        f"- Retune targets: {retune_ids}",
+        "",
+        "## Include",
     ]
     if retune_results:
         for result in retune_results:
             retune_lines.append(f"- {result['criterion_id']} {result['name']}: {result['status']}. {result['retune_hint']}")
     else:
-        retune_lines.append("- None")
+        retune_lines.append("- No criteria require retune.")
     retune_lines.extend(
         [
             "",
-            "## Keep unchanged",
-            "- Do not change criteria already marked pass.",
+            "## Exclude",
+            "- Do not rework criteria already marked pass:",
+        ]
+    )
+    if passed_results:
+        retune_lines.extend(f"  - {result['criterion_id']} {result['name']}" for result in passed_results)
+    else:
+        retune_lines.append("  - None")
+    retune_lines.extend(
+        [
             "- Do not store raw transcripts, raw logs, or unredacted command output.",
             "",
-            "## Required fix",
-            "- Provide summarized evidence references for the criteria above.",
+            "## Working rules",
+            "- Keep the retune patch limited to the Include criteria.",
+            "- Preserve existing behavior that supports Exclude criteria.",
+            "- Store only summarized evidence references.",
+            "",
+            "## Evaluation",
+        ]
+    )
+    if retune_results:
+        for result in retune_results:
+            retune_lines.append(f"- {result['criterion_id']}: {result.get('reason', 'No reason recorded.')}")
+    else:
+        retune_lines.append("- No failed, partial, or missing_evidence criteria remain.")
+    retune_lines.extend(
+        [
+            "",
+            "## Evidence",
+            "- Update summarized evidence references for the Include criteria only.",
+            "- Do not store raw command output, raw task logs, or chat transcripts.",
             "",
             "## Completion rule",
-            "- Stop when the listed criteria pass or when a hard gate remains blocked.",
+            "- Stop when every Include criterion passes or when a hard gate remains blocked with a clear reason.",
+            "",
+            "## Report back",
+            "- Summarize changed files, evidence references, remaining blockers, and preserved pass criteria.",
             "",
         ]
     )
-    retune_path = write_text(run_dir(root_path, run_id) / "retune_goal.md", "\n".join(retune_lines))
+    retune_text = "\n".join(retune_lines)
+    assert_valid(lint_goal_text(retune_text, scorecard.get("mode", DEFAULT_MODE)))
+    retune_path = write_text(run_dir(root_path, run_id) / "retune_goal.md", retune_text)
     return {"report": report_path, "retune": retune_path}

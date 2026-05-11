@@ -50,7 +50,7 @@ python3 -m rubricodex.cli score compute --run-id example-v0.1
 python3 -m rubricodex.cli report --run-id example-v0.1
 ```
 
-Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. 로컬 runner는 기본적으로 dry-run handoff만 기록하며, 직접 Codex CLI 실행은 `--execute`로 명시할 때만 시도합니다.
+Codex app plugin 표면은 [plugins/rubricodex](plugins/rubricodex)에 있습니다. 로컬 runner는 기본적으로 dry-run handoff만 기록하며, 직접 Codex CLI 실행은 `--execute`로 명시할 때만 시도합니다. `report`는 실패 이유와 `retune_goal.md`를 만들고, 이미 pass한 기준은 재작업 대상에서 제외합니다.
 
 ## Fixture
 

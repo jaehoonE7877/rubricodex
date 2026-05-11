@@ -19,7 +19,7 @@
 7. `rubricodex probe plan --run-id example-v0.1`로 필요한 read-only probe만 선택합니다.
 8. `rubricodex probe run --run-id example-v0.1 --parallel 2`로 probe result를 normalize합니다.
 9. 구현 후 `.rubricodex/runs/example-v0.1/evidence.json`에 요약 evidence만 기록합니다.
-10. `rubricodex score compute --run-id example-v0.1`와 `rubricodex report --run-id example-v0.1`로 scorecard/report/retune instruction을 생성합니다.
+10. `rubricodex score compute --run-id example-v0.1`와 `rubricodex report --run-id example-v0.1`로 scorecard/report/retune instruction을 생성합니다. `retune_goal.md`는 failed/partial/missing_evidence 기준만 다시 시도하고 pass 기준은 보존 목록으로 보호합니다.
 
 ## Modes
 
