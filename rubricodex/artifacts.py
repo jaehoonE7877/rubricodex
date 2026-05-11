@@ -848,6 +848,7 @@ def run_local(
     execution_mode = "execute" if execute else "dry_run"
     command = f"{codex_bin} exec --cd <project-root> -"
     command_result: dict[str, Any]
+    status = "pass"
 
     if execute:
         goal_text = (taskpack_dir(root_path, run_id) / "goal.md").read_text(encoding="utf-8")
@@ -865,6 +866,8 @@ def run_local(
         }
         default_summary = f"Codex CLI local execution exited with code {completed.returncode}."
         changed_files = changed_files or _summarize_changed_files(root_path)
+        if completed.returncode != 0:
+            status = "fail"
     else:
         command_result = {
             "command": command,
@@ -904,7 +907,7 @@ def run_local(
     write_json(evidence_path, evidence)
 
     return {
-        "status": "pass",
+        "status": status,
         "execution_mode": execution_mode,
         "manifest_path": str(manifest_path),
         "evidence_path": str(evidence_path),

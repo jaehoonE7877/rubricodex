@@ -131,7 +131,7 @@ def cmd_run_local(args: argparse.Namespace) -> int:
         changed_files=args.changed_file,
     )
     _print_json(result)
-    return 0
+    return 0 if result["status"] == "pass" else 1
 
 
 def build_parser() -> argparse.ArgumentParser:

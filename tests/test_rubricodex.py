@@ -430,6 +430,20 @@ class RubricodexContractTests(unittest.TestCase):
             evidence["runner_manifest_path"],
         )
 
+    def test_run_local_execute_reports_nonzero_exit_without_raw_output(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = run_local(self.root, "example-v0.1", execute=True, codex_bin="false")
+
+        manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(manifest["command_results"][0]["exit_code"], 1)
+        self.assertEqual(validate_run_manifest(manifest), [])
+        self.assertNotIn("stdout", str(manifest).lower())
+        self.assertNotIn("stderr", str(manifest).lower())
+
     def test_cli_run_local_accepts_summary_and_writes_manifest(self) -> None:
         self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
