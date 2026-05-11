@@ -733,6 +733,20 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(lint_goal_text(text), [])
         self.assertLess(len(text), 2400)
 
+    def test_report_handles_legacy_scorecard_without_reason(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        for result in scorecard["results"]:
+            result.pop("reason", None)
+        write_json(run_dir(self.root, "example-v0.1") / "scorecard.json", scorecard)
+
+        paths = write_report(self.root, "example-v0.1")
+
+        text = paths["retune"].read_text(encoding="utf-8")
+        self.assertIn("No reason recorded", text)
+        self.assertEqual(lint_goal_text(text), [])
+
     def test_legacy_fixture_target_matrix_harness_plan_not_canonical(self) -> None:
         fixture = REPO_ROOT / "examples/source-code-endpoint/.rubricodex"
         self.assertFalse((fixture / "target.json").exists())

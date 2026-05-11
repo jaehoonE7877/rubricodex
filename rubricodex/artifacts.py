@@ -1428,7 +1428,7 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
     )
     if retune_results:
         for result in retune_results:
-            retune_lines.append(f"- {result['criterion_id']}: {result['reason']}")
+            retune_lines.append(f"- {result['criterion_id']}: {result.get('reason', 'No reason recorded.')}")
     else:
         retune_lines.append("- No failed, partial, or missing_evidence criteria remain.")
     retune_lines.extend(
