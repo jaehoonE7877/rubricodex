@@ -25,7 +25,12 @@ RUN_MANIFEST_TYPE = "rubricodex.run_manifest"
 LOCAL_RUNNER_EXECUTOR = "codex-cli-local"
 PROBE_PLAN_TYPE = "rubricodex.probe_plan"
 PROBE_RESULT_TYPE = "rubricodex.probe_result"
+APP_SESSION_TYPE = "rubricodex.app_session"
+APP_CARDS_TYPE = "rubricodex.app_cards"
+APP_COLLECTION_TYPE = "rubricodex.app_collection"
+ORCHESTRATOR_TYPE = "rubricodex.orchestrator"
 PROBE_RESULT_STATUSES = {"probe_pass", "probe_failure", "probe_error", "probe_skipped"}
+APP_CARD_TYPES = {"harness_plan", "matrix", "report", "retune"}
 
 REQUIRED_BRIEF_BLOCKS = (
     "purpose",
@@ -147,6 +152,26 @@ def probe_result_dir(root: Path | str, run_id: str) -> Path:
 
 def probe_result_path(root: Path | str, run_id: str, criterion_id: str) -> Path:
     return probe_result_dir(root, run_id) / f"{criterion_id}.json"
+
+
+def app_session_dir(root: Path | str, session_id: str) -> Path:
+    return artifact_root(root) / "app" / "sessions" / session_id
+
+
+def app_session_path(root: Path | str, session_id: str) -> Path:
+    return app_session_dir(root, session_id) / "app-session.json"
+
+
+def app_cards_path(root: Path | str, session_id: str) -> Path:
+    return app_session_dir(root, session_id) / "cards.json"
+
+
+def app_collection_path(root: Path | str, run_id: str) -> Path:
+    return run_dir(root, run_id) / "app-collection.json"
+
+
+def orchestrator_path(root: Path | str, run_id: str) -> Path:
+    return run_dir(root, run_id) / "orchestrator.json"
 
 
 def read_json(path: Path | str) -> dict[str, Any]:
@@ -550,6 +575,118 @@ def validate_probe_result(data: dict[str, Any]) -> list[ValidationIssue]:
             issues.append(ValidationIssue(f"$.{forbidden}", "raw probe output fields are not allowed"))
     if "exit_code" in data and data["exit_code"] is not None and not isinstance(data["exit_code"], int):
         issues.append(ValidationIssue("$.exit_code", "exit_code must be an integer or null"))
+    return issues
+
+
+def validate_app_session(data: dict[str, Any]) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != APP_SESSION_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {APP_SESSION_TYPE}"))
+    for key in ("session_id", "run_id", "entrypoint", "mention", "mode", "user_goal_summary"):
+        if not isinstance(data.get(key), str) or not data[key].strip():
+            issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
+    selected_context_refs = data.get("selected_context_refs")
+    if not isinstance(selected_context_refs, list):
+        issues.append(ValidationIssue("$.selected_context_refs", "selected_context_refs must be a list"))
+    else:
+        for index, context_ref in enumerate(selected_context_refs):
+            if not isinstance(context_ref, str) or not context_ref.strip():
+                issues.append(ValidationIssue(f"$.selected_context_refs[{index}]", "context ref must be a non-empty string"))
+    if not isinstance(data.get("approved_decisions_ref"), str) or not data["approved_decisions_ref"].strip():
+        issues.append(ValidationIssue("$.approved_decisions_ref", "approved_decisions_ref is required"))
+    if data.get("raw_transcript_stored") is not False:
+        issues.append(ValidationIssue("$.raw_transcript_stored", "raw_transcript_stored must be false"))
+    return issues
+
+
+def validate_app_cards(data: dict[str, Any], session: dict[str, Any] | None = None) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != APP_CARDS_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {APP_CARDS_TYPE}"))
+    for key in ("session_id", "run_id"):
+        if not isinstance(data.get(key), str) or not data[key].strip():
+            issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
+    if session:
+        if data.get("session_id") != session.get("session_id"):
+            issues.append(ValidationIssue("$.session_id", "cards session_id must match app-session.json"))
+        if data.get("run_id") != session.get("run_id"):
+            issues.append(ValidationIssue("$.run_id", "cards run_id must match app-session.json"))
+    if data.get("raw_transcript_stored") is not False:
+        issues.append(ValidationIssue("$.raw_transcript_stored", "raw_transcript_stored must be false"))
+
+    cards = data.get("cards")
+    if not isinstance(cards, list):
+        return issues + [ValidationIssue("$.cards", "cards must be a list")]
+    seen_types: set[str] = set()
+    for index, card in enumerate(cards):
+        path = f"$.cards[{index}]"
+        if not isinstance(card, dict):
+            issues.append(ValidationIssue(path, "card must be an object"))
+            continue
+        card_type = card.get("card_type")
+        if card_type not in APP_CARD_TYPES:
+            issues.append(
+                ValidationIssue(f"{path}.card_type", "card_type must be harness_plan, matrix, report, or retune")
+            )
+        else:
+            seen_types.add(str(card_type))
+        for key in ("title", "summary"):
+            if not isinstance(card.get(key), str) or not card[key].strip():
+                issues.append(ValidationIssue(f"{path}.{key}", f"{key} is required"))
+        artifact_refs = card.get("artifact_refs")
+        if not isinstance(artifact_refs, list) or not artifact_refs:
+            issues.append(ValidationIssue(f"{path}.artifact_refs", "artifact_refs must be a non-empty list"))
+        else:
+            for ref_index, artifact_ref in enumerate(artifact_refs):
+                if not isinstance(artifact_ref, str) or not artifact_ref.strip():
+                    issues.append(
+                        ValidationIssue(
+                            f"{path}.artifact_refs[{ref_index}]",
+                            "artifact ref must be a non-empty string",
+                        )
+                    )
+    missing = sorted(APP_CARD_TYPES - seen_types)
+    if missing:
+        issues.append(ValidationIssue("$.cards", "missing app card types: " + ", ".join(missing)))
+    return issues
+
+
+def validate_app_collection(data: dict[str, Any]) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != APP_COLLECTION_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {APP_COLLECTION_TYPE}"))
+    for key in ("session_id", "run_id", "app_session_path", "cards_path", "report_path", "retune_goal_path"):
+        if not isinstance(data.get(key), str) or not data[key].strip():
+            issues.append(ValidationIssue(f"$.{key}", f"{key} is required"))
+    if data.get("raw_transcript_stored") is not False:
+        issues.append(ValidationIssue("$.raw_transcript_stored", "raw_transcript_stored must be false"))
+    if not isinstance(data.get("card_count"), int) or data["card_count"] < 0:
+        issues.append(ValidationIssue("$.card_count", "card_count must be a non-negative integer"))
+    return issues
+
+
+def validate_orchestrator(data: dict[str, Any]) -> list[ValidationIssue]:
+    issues = validate_forbidden_keys(data)
+    if data.get("artifact_type") != ORCHESTRATOR_TYPE:
+        issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {ORCHESTRATOR_TYPE}"))
+    if data.get("executor") != LOCAL_RUNNER_EXECUTOR:
+        issues.append(ValidationIssue("$.executor", f"executor must be {LOCAL_RUNNER_EXECUTOR}"))
+    if data.get("raw_output_stored") is not False:
+        issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
+    if data.get("status") not in {"pass", "needs_retune", "fail"}:
+        issues.append(ValidationIssue("$.status", "status must be pass, needs_retune, or fail"))
+    steps = data.get("steps")
+    if not isinstance(steps, list) or not steps:
+        issues.append(ValidationIssue("$.steps", "steps must be a non-empty list"))
+    else:
+        for index, step in enumerate(steps):
+            path = f"$.steps[{index}]"
+            if not isinstance(step, dict):
+                issues.append(ValidationIssue(path, "step must be an object"))
+                continue
+            for key in ("name", "status"):
+                if not isinstance(step.get(key), str) or not step[key].strip():
+                    issues.append(ValidationIssue(f"{path}.{key}", f"{key} is required"))
     return issues
 
 
@@ -1012,6 +1149,25 @@ def run_local(
     }
 
 
+def _existing_manifest_hints(root: Path, run_id: str) -> dict[str, Any]:
+    manifest_file = run_manifest_path(root, run_id)
+    if not manifest_file.exists():
+        return {}
+    try:
+        manifest = read_json(manifest_file)
+    except (ArtifactError, OSError, json.JSONDecodeError):
+        return {}
+    if manifest.get("artifact_type") != RUN_MANIFEST_TYPE:
+        return {}
+    hints: dict[str, Any] = {}
+    if isinstance(manifest.get("result_summary"), str) and manifest["result_summary"].strip():
+        hints["result_summary"] = manifest["result_summary"]
+    for key in ("verification_commands", "changed_files"):
+        if isinstance(manifest.get(key), list):
+            hints[key] = manifest[key]
+    return hints
+
+
 def _criterion_lookup(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(criterion["id"]): criterion
@@ -1450,3 +1606,209 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
     assert_valid(lint_goal_text(retune_text, scorecard.get("mode", DEFAULT_MODE)))
     retune_path = write_text(run_dir(root_path, run_id) / "retune_goal.md", retune_text)
     return {"report": report_path, "retune": retune_path}
+
+
+def _find_app_session_for_run(root: Path, run_id: str) -> tuple[dict[str, Any], Path]:
+    sessions_dir = artifact_root(root) / "app" / "sessions"
+    if not sessions_dir.exists():
+        raise ArtifactError([ValidationIssue("$.app.sessions", "app sessions directory is missing")])
+    matches: list[tuple[dict[str, Any], Path]] = []
+    for path in sorted(sessions_dir.glob("*/app-session.json")):
+        session = read_json(path)
+        if session.get("run_id") == run_id:
+            matches.append((session, path))
+    if not matches:
+        raise ArtifactError([ValidationIssue("$.run_id", f"no app session found for run_id {run_id}")])
+    if len(matches) > 1:
+        raise ArtifactError([ValidationIssue("$.run_id", f"multiple app sessions found for run_id {run_id}")])
+    return matches[0]
+
+
+def import_app_session(root: Path | str, source_file: Path | str, mode: str = DEFAULT_MODE) -> dict[str, Any]:
+    root_path = Path(root)
+    source = Path(source_file)
+    session = read_json(source)
+    assert_valid(validate_app_session(session))
+    run_id = str(session["run_id"])
+    target = app_session_path(root_path, str(session["session_id"]))
+    if source.resolve() != target.resolve():
+        write_json(target, session)
+    import_artifact = base_artifact("rubricodex.app_session_import", mode=mode, run_id=run_id)
+    import_artifact.update(
+        {
+            "session_id": session["session_id"],
+            "app_session_path": _relative_artifact_path(target, root_path),
+            "raw_transcript_stored": False,
+        }
+    )
+    import_path = write_json(run_dir(root_path, run_id) / "app-session-import.json", import_artifact)
+    return {
+        "status": "pass",
+        "run_id": run_id,
+        "session_id": session["session_id"],
+        "app_session_path": str(target),
+        "import_path": str(import_path),
+    }
+
+
+def collect_app_artifacts(root: Path | str, run_id: str, mode: str = DEFAULT_MODE) -> dict[str, Any]:
+    root_path = Path(root)
+    session, session_file = _find_app_session_for_run(root_path, run_id)
+    assert_valid(validate_app_session(session))
+    cards_file = app_cards_path(root_path, str(session["session_id"]))
+    cards = read_json(cards_file)
+    assert_valid(validate_app_cards(cards, session))
+
+    report = run_dir(root_path, run_id) / "report.md"
+    retune = run_dir(root_path, run_id) / "retune_goal.md"
+    missing = [str(path) for path in (report, retune) if not path.exists()]
+    if missing:
+        raise ArtifactError([ValidationIssue("$.app_collection", "missing shared artifacts: " + ", ".join(missing))])
+
+    collection = base_artifact(APP_COLLECTION_TYPE, mode=mode, run_id=run_id)
+    collection.update(
+        {
+            "session_id": session["session_id"],
+            "app_session_path": _relative_artifact_path(session_file, root_path),
+            "cards_path": _relative_artifact_path(cards_file, root_path),
+            "report_path": _relative_artifact_path(report, root_path),
+            "retune_goal_path": _relative_artifact_path(retune, root_path),
+            "card_count": len(cards["cards"]),
+            "raw_transcript_stored": False,
+        }
+    )
+    assert_valid(validate_app_collection(collection))
+    path = write_json(app_collection_path(root_path, run_id), collection)
+    return {
+        "status": "pass",
+        "app_collection_path": str(path),
+        "card_count": collection["card_count"],
+        "report_path": str(report),
+        "retune_goal_path": str(retune),
+    }
+
+
+def _artifact_exists(root: Path, relative_path: str) -> bool:
+    return (root / relative_path).exists()
+
+
+def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
+    root_path = Path(root)
+    required = {
+        "goal": f".rubricodex/taskpacks/{run_id}/goal.md",
+        "prompt_lint": f".rubricodex/taskpacks/{run_id}/prompt-lint.json",
+        "matrix_lock": f".rubricodex/taskpacks/{run_id}/goal.lock.json",
+        "run_manifest": f".rubricodex/runs/{run_id}/run-manifest.json",
+        "evidence": f".rubricodex/runs/{run_id}/evidence.json",
+        "scorecard": f".rubricodex/runs/{run_id}/scorecard.json",
+        "report": f".rubricodex/runs/{run_id}/report.md",
+        "retune_goal": f".rubricodex/runs/{run_id}/retune_goal.md",
+    }
+    missing = [name for name, path in required.items() if not _artifact_exists(root_path, path)]
+    decision = None
+    if "scorecard" not in missing:
+        scorecard = read_json(run_dir(root_path, run_id) / "scorecard.json")
+        assert_valid(validate_scorecard(scorecard))
+        decision = scorecard.get("decision")
+    return {
+        "status": "complete" if not missing else "incomplete",
+        "run_id": run_id,
+        "decision": decision,
+        "missing": missing,
+        "report_path": required["report"],
+        "retune_goal_path": required["retune_goal"],
+        "app_collection_path": str(app_collection_path(root_path, run_id)),
+        "orchestrator_path": str(orchestrator_path(root_path, run_id)),
+    }
+
+
+def orchestrate_run(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    backend: str = LOCAL_RUNNER_EXECUTOR,
+    parallel: int = 4,
+    execute: bool = False,
+    codex_bin: str = "codex",
+) -> dict[str, Any]:
+    if backend != LOCAL_RUNNER_EXECUTOR:
+        raise ArtifactError([ValidationIssue("$.backend", f"backend must be {LOCAL_RUNNER_EXECUTOR}")])
+    root_path = Path(root)
+    steps: list[dict[str, str]] = []
+
+    lock = verify_matrix_lock(root_path, run_id, mode=mode)
+    steps.append({"name": "matrix_lock", "status": lock["status"]})
+    if lock["status"] != "pass":
+        status = "fail"
+    else:
+        manifest_hints = _existing_manifest_hints(root_path, run_id)
+        run_result = run_local(
+            root_path,
+            run_id,
+            mode=mode,
+            execute=execute,
+            codex_bin=codex_bin,
+            **manifest_hints,
+        )
+        steps.append({"name": "run_local", "status": run_result["status"]})
+        if run_result["status"] != "pass":
+            status = "fail"
+        else:
+            probe_plan = plan_probes(root_path, run_id, mode=mode, parallel=parallel)
+            steps.append({"name": "probe_plan", "status": probe_plan["status"]})
+            probe_run = run_probes(
+                root_path,
+                run_id,
+                mode=mode,
+                parallel=parallel,
+                execute=execute,
+                codex_bin=codex_bin,
+            )
+            steps.append({"name": "probe_run", "status": probe_run["status"]})
+            scorecard = compute_scorecard(root_path, run_id)
+            steps.append({"name": "score_compute", "status": "pass"})
+            write_report(root_path, run_id)
+            steps.append({"name": "report", "status": "pass"})
+
+            app_collect_failed = False
+            if (artifact_root(root_path) / "app" / "sessions").exists():
+                try:
+                    collect_app_artifacts(root_path, run_id, mode=mode)
+                    steps.append({"name": "app_collect", "status": "pass"})
+                except ArtifactError as error:
+                    no_session = any(
+                        issue.path == "$.run_id" and issue.message.startswith("no app session")
+                        for issue in error.issues
+                    )
+                    steps.append({"name": "app_collect", "status": "skipped" if no_session else "fail"})
+                    app_collect_failed = not no_session
+
+            if app_collect_failed:
+                status = "fail"
+            elif scorecard["decision"] == "pass":
+                status = "pass"
+            elif scorecard["decision"] in {"pass_with_warnings", "needs_retune"}:
+                status = "needs_retune"
+            else:
+                status = "fail"
+
+    orchestration = base_artifact(ORCHESTRATOR_TYPE, mode=mode, run_id=run_id)
+    orchestration.update(
+        {
+            "executor": backend,
+            "status": status,
+            "parallel": parallel,
+            "raw_output_stored": False,
+            "steps": steps,
+            "report_path": f".rubricodex/runs/{run_id}/report.md",
+            "retune_goal_path": f".rubricodex/runs/{run_id}/retune_goal.md",
+        }
+    )
+    assert_valid(validate_orchestrator(orchestration))
+    path = write_json(orchestrator_path(root_path, run_id), orchestration)
+    return {
+        "status": status,
+        "orchestrator_path": str(path),
+        "steps": steps,
+        "run_status": orchestrate_status(root_path, run_id),
+    }
