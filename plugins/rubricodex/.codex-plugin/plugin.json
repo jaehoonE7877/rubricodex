@@ -1,6 +1,6 @@
 {
   "name": "rubricodex",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Compress ambiguous Codex implementation requests into bounded goals, evidence, scorecards, and retune instructions.",
   "author": {
     "name": "Rubricodex",
@@ -23,6 +23,9 @@
       "Score this implementation with the Rubricodex matrix.",
       "Create a retune goal from this Rubricodex scorecard."
     ],
+    "composerIcon": "./assets/rubricodex-plugin-thumbnail.png",
+    "logo": "./assets/rubricodex-plugin-icon.png",
+    "screenshots": [],
     "brandColor": "#2563EB"
   }
 }
