@@ -1743,17 +1743,27 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
         "orchestrator": f".rubricodex/runs/{run_id}/orchestrator.json",
     }
     app_session_required = False
+    app_session: dict[str, Any] | None = None
+    app_session_file: Path | None = None
+    app_cards_file: Path | None = None
+    app_card_count: int | None = None
     status_issues: list[ValidationIssue] = []
     if (artifact_root(root_path) / "app" / "sessions").exists():
         try:
-            session, _session_file = _find_app_session_for_run(root_path, run_id)
+            session, session_file = _find_app_session_for_run(root_path, run_id)
             app_session_required = True
+            app_session = session
+            app_session_file = session_file
             required["app_collection"] = f".rubricodex/runs/{run_id}/app-collection.json"
             status_issues.extend(validate_app_session(session))
             cards_file = app_cards_path(root_path, str(session.get("session_id", "")))
+            app_cards_file = cards_file
             if cards_file.is_file():
                 cards = read_json(cards_file)
                 status_issues.extend(validate_app_cards(cards, session))
+                card_items = cards.get("cards")
+                if isinstance(card_items, list):
+                    app_card_count = len(card_items)
                 status_issues.extend(
                     _validate_app_card_shared_refs(
                         cards,
@@ -1793,6 +1803,38 @@ def orchestrate_status(root: Path | str, run_id: str) -> dict[str, Any]:
                 ValidationIssue(
                     "$.app_collection.retune_goal_path",
                     f"app collection must reference {required['retune_goal']}",
+                )
+            )
+        if app_session is not None and app_collection.get("session_id") != app_session.get("session_id"):
+            status_issues.append(
+                ValidationIssue(
+                    "$.app_collection.session_id",
+                    f"app collection session_id must match {app_session.get('session_id')}",
+                )
+            )
+        if app_session_file is not None:
+            expected_session_path = _relative_artifact_path(app_session_file, root_path)
+            if app_collection.get("app_session_path") != expected_session_path:
+                status_issues.append(
+                    ValidationIssue(
+                        "$.app_collection.app_session_path",
+                        f"app collection must reference {expected_session_path}",
+                    )
+                )
+        if app_cards_file is not None:
+            expected_cards_path = _relative_artifact_path(app_cards_file, root_path)
+            if app_collection.get("cards_path") != expected_cards_path:
+                status_issues.append(
+                    ValidationIssue(
+                        "$.app_collection.cards_path",
+                        f"app collection must reference {expected_cards_path}",
+                    )
+                )
+        if app_card_count is not None and app_collection.get("card_count") != app_card_count:
+            status_issues.append(
+                ValidationIssue(
+                    "$.app_collection.card_count",
+                    f"app collection card_count must be {app_card_count}",
                 )
             )
     if orchestration_status == "fail" or status_issues:

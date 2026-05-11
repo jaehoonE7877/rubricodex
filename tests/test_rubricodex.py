@@ -716,6 +716,31 @@ class RubricodexContractTests(unittest.TestCase):
             {issue["path"] for issue in stale_status["issues"]},
         )
 
+    def test_orchestrate_status_rejects_stale_app_collection_session_refs(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        write_json(app_session_path(self.root, "example-session"), sample_app_session())
+        write_json(app_cards_path(self.root, "example-session"), sample_app_cards())
+        orchestrate_run(self.root, "example-v0.1", parallel=2)
+
+        collection = read_json(app_collection_path(self.root, "example-v0.1"))
+        collection["session_id"] = "other-session"
+        collection["app_session_path"] = ".rubricodex/app/sessions/other-session/app-session.json"
+        collection["cards_path"] = ".rubricodex/app/sessions/other-session/cards.json"
+        collection["card_count"] = 999
+        write_json(app_collection_path(self.root, "example-v0.1"), collection)
+
+        status = orchestrate_status(self.root, "example-v0.1")
+
+        self.assertEqual(status["status"], "fail")
+        issue_paths = {issue["path"] for issue in status["issues"]}
+        self.assertIn("$.app_collection.session_id", issue_paths)
+        self.assertIn("$.app_collection.app_session_path", issue_paths)
+        self.assertIn("$.app_collection.cards_path", issue_paths)
+        self.assertIn("$.app_collection.card_count", issue_paths)
+
     def test_orchestrate_status_revalidates_source_app_artifacts(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
