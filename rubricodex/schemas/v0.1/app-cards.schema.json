@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/app-cards.schema.json",
+  "title": "Rubricodex App Cards",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "session_id", "run_id", "raw_transcript_stored", "cards"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.app_cards" },
+    "rubricodex_version": { "type": "string" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "raw_transcript_stored": { "const": false },
+    "cards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["card_type", "title", "summary", "artifact_refs"],
+        "properties": {
+          "card_type": { "enum": ["harness_plan", "matrix", "report", "retune"] },
+          "title": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "artifact_refs": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

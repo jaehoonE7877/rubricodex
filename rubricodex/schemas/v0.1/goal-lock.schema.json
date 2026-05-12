@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/goal-lock.schema.json",
+  "title": "Rubricodex Goal Lock",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "mode", "run_id", "lock_version", "brief_sha256", "matrix_sha256", "goal_sha256", "locked_scope", "locked_criteria"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.goal_lock" },
+    "rubricodex_version": { "type": "string" },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "lock_version": { "type": "string", "minLength": 1 },
+    "brief_sha256": { "type": "string", "minLength": 1 },
+    "matrix_sha256": { "type": "string", "minLength": 1 },
+    "goal_sha256": { "type": "string", "minLength": 1 },
+    "locked_scope": { "type": "object" },
+    "locked_criteria": { "type": "array" }
+  }
+}

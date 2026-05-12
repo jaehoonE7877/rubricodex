@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/orchestrator.schema.json",
+  "title": "Rubricodex Orchestrator",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "mode", "run_id", "executor", "status", "raw_output_stored", "steps"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.orchestrator" },
+    "rubricodex_version": { "type": "string" },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "executor": { "const": "codex-cli-local" },
+    "status": { "enum": ["pass", "needs_retune", "fail"] },
+    "raw_output_stored": { "const": false },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

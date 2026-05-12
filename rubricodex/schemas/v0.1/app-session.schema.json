@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/app-session.schema.json",
+  "title": "Rubricodex App Session",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "session_id", "run_id", "entrypoint", "mention", "mode", "user_goal_summary", "selected_context_refs", "approved_decisions_ref", "raw_transcript_stored"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.app_session" },
+    "rubricodex_version": { "type": "string" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "entrypoint": { "type": "string", "minLength": 1 },
+    "mention": { "type": "string", "minLength": 1 },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "user_goal_summary": { "type": "string", "minLength": 1 },
+    "selected_context_refs": { "type": "array", "items": { "type": "string" } },
+    "approved_decisions_ref": { "type": "string", "minLength": 1 },
+    "raw_transcript_stored": { "const": false }
+  }
+}
