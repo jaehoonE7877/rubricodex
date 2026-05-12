@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./assets/codex-plugin/logo.png" alt="Rubricodex logo" width="128" />
+  <img src="./plugins/rubricodex/assets/rubricodex-plugin-icon.png" alt="Rubricodex logo" width="128" />
 
   <h1>Rubricodex</h1>
 
@@ -12,7 +12,7 @@
     ·
     <a href="#어떻게-돌아가나"><strong>흐름</strong></a>
     ·
-    <a href="#예시"><strong>예시</strong></a>
+    <a href="#더-살펴보기"><strong>더 보기</strong></a>
   </p>
 
   <p>
@@ -144,48 +144,15 @@ flowchart LR
 | `strict` | 실수 비용이 큰 작업 | 결제, 권한, 개인정보, migration |
 | `audit` | 구현 없이 검토만 할 때 | 현재 diff나 결과 리뷰 |
 
-## 예시
+## 더 살펴보기
 
-Fixture는 app-first/local CLI 흐름이 한 번에 어떻게 이어지는지 보여줍니다.
+README는 설치와 핵심 흐름만 다루는 짧은 입구입니다. 세부 명령과 검증 절차는 아래 위치에서 확인합니다.
 
-[examples/source-code-endpoint](examples/source-code-endpoint)
-
-```bash
-python3 -m rubricodex.cli --root examples/source-code-endpoint goal compile --run-id example-v0.1
-python3 -m rubricodex.cli --root examples/source-code-endpoint prompt lint --run-id example-v0.1
-python3 -m rubricodex.cli --root examples/source-code-endpoint matrix lock --run-id example-v0.1
-python3 -m rubricodex.cli --root examples/source-code-endpoint orchestrate run --run-id example-v0.1 --parallel 2
-python3 -m rubricodex.cli --root examples/source-code-endpoint orchestrate status --run-id example-v0.1
-```
-
-<details>
-<summary>낮은 단계 명령 보기</summary>
-
-```bash
-rubricodex goal compile --run-id example-v0.1
-rubricodex prompt lint --run-id example-v0.1
-rubricodex matrix lock --run-id example-v0.1
-rubricodex run local --run-id example-v0.1
-rubricodex probe plan --run-id example-v0.1
-rubricodex probe run --run-id example-v0.1 --parallel 2
-rubricodex score compute --run-id example-v0.1
-rubricodex report --run-id example-v0.1
-```
-
-</details>
-
-## Codex app plugin 표면
-
-Codex app plugin 파일은 [plugins/rubricodex](plugins/rubricodex)에 있습니다.
-
-App-first 흐름은 아래 명령으로 같은 artifact를 검증합니다.
-
-```bash
-rubricodex app session import --from .rubricodex/app/sessions/<session-id>/app-session.json
-rubricodex app collect --run-id example-v0.1
-rubricodex orchestrate run --run-id example-v0.1
-rubricodex orchestrate status --run-id example-v0.1
-```
+| 보고 싶은 것 | 위치 |
+| --- | --- |
+| app-first/local CLI 전체 fixture | [examples/source-code-endpoint](examples/source-code-endpoint) |
+| Codex app plugin manifest, skill, icon assets | [plugins/rubricodex](plugins/rubricodex) |
+| Rubricodex skill 사용 규칙 | [plugins/rubricodex/skills/rubricodex/SKILL.md](plugins/rubricodex/skills/rubricodex/SKILL.md) |
 
 로컬 runner는 기본적으로 dry-run handoff만 기록합니다. 직접 Codex CLI 실행은 `--execute`를 명시할 때만 시도합니다.
 
