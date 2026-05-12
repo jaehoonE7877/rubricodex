@@ -33,7 +33,17 @@ RAW_STORAGE_TERMS = (
 )
 STORE_TERMS = ("store", "save", "commit", "write", "persist", "record", "저장", "커밋", "기록")
 IMPLEMENT_TERMS = ("implement", "execute", "handoff", "start coding", "run", "구현", "실행", "진행")
-COMPLETION_TERMS = ("complete", "completed", "done", "ready", "passed", "final", "완료", "준비", "통과")
+ENGLISH_COMPLETION_TERMS = ("complete", "completed", "done", "passed", "final")
+KOREAN_COMPLETION_TERMS = ("완료", "준비", "통과")
+COMPLETION_TERM_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(term) for term in ENGLISH_COMPLETION_TERMS) + r")\b",
+    re.IGNORECASE,
+)
+READY_COMPLETION_PATTERN = re.compile(
+    r"\b(?:rubricodex|task|implementation|work|pr|branch|changes?)\b[^\n.!?]{0,80}\bready\b"
+    r"|\bready\b\s+(?:for\s+(?:review|merge|release|pr)|to\s+(?:ship|merge|release|submit))\b",
+    re.IGNORECASE,
+)
 
 
 def _cwd(payload: dict[str, Any]) -> Path:
@@ -48,9 +58,17 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in lowered for term in terms)
 
 
-def _is_rubricodex_prompt(text: str, root: Path) -> bool:
+def _is_rubricodex_prompt(text: str) -> bool:
     lowered = text.lower()
-    return "@rubricodex" in lowered or "rubricodex" in lowered or artifact_root(root).exists()
+    return "@rubricodex" in lowered or "rubricodex" in lowered
+
+
+def _is_completion_claim(text: str) -> bool:
+    return (
+        COMPLETION_TERM_PATTERN.search(text) is not None
+        or READY_COMPLETION_PATTERN.search(text) is not None
+        or _contains_any(text, KOREAN_COMPLETION_TERMS)
+    )
 
 
 def _additional_context(event_name: str, message: str) -> dict[str, Any]:
@@ -106,7 +124,7 @@ def _summarize_status(status: dict[str, Any]) -> str:
 def evaluate_intake_boundary(payload: dict[str, Any]) -> dict[str, Any]:
     root = _cwd(payload)
     prompt = str(payload.get("prompt") or "")
-    if not _is_rubricodex_prompt(prompt, root):
+    if not _is_rubricodex_prompt(prompt):
         return {}
     if _contains_any(prompt, RAW_STORAGE_TERMS) and _contains_any(prompt, STORE_TERMS):
         return _block(
@@ -121,7 +139,7 @@ def evaluate_intake_boundary(payload: dict[str, Any]) -> dict[str, Any]:
 def evaluate_matrix_readiness(payload: dict[str, Any]) -> dict[str, Any]:
     root = _cwd(payload)
     prompt = str(payload.get("prompt") or "")
-    if not artifact_root(root).exists() or not _is_rubricodex_prompt(prompt, root):
+    if not artifact_root(root).exists() or not _is_rubricodex_prompt(prompt):
         return {}
     if not _contains_any(prompt, IMPLEMENT_TERMS):
         return {}
@@ -153,7 +171,7 @@ def evaluate_matrix_readiness(payload: dict[str, Any]) -> dict[str, Any]:
 def evaluate_completion_claim(payload: dict[str, Any]) -> dict[str, Any]:
     root = _cwd(payload)
     message = str(payload.get("last_assistant_message") or "")
-    if not artifact_root(root).exists() or not _contains_any(message, COMPLETION_TERMS):
+    if not artifact_root(root).exists() or not _is_completion_claim(message):
         return {}
     run_id = _latest_run_id(root)
     if run_id is None:

@@ -359,6 +359,20 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["decision"], "block")
         self.assertIn("matrix lock", result["reason"])
 
+    def test_hook_matrix_readiness_ignores_untargeted_prompt_in_initialized_project(self) -> None:
+        init_project(self.root)
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "run tests",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
     def test_hook_completion_blocks_claim_with_missing_artifacts(self) -> None:
         init_project(self.root)
         run_dir(self.root, "example-v0.1").mkdir(parents=True)
@@ -374,6 +388,23 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result["decision"], "block")
         self.assertIn("missing", result["reason"])
+
+    def test_hook_completion_ignores_non_completion_ready_phrases(self) -> None:
+        init_project(self.root)
+        run_dir(self.root, "example-v0.1").mkdir(parents=True)
+
+        for message in ("I am already investigating this.", "I am ready to investigate."):
+            with self.subTest(message=message):
+                result = evaluate_gate(
+                    "completion-claim",
+                    {
+                        "hook_event_name": "Stop",
+                        "last_assistant_message": message,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result, {})
 
     def test_brief_valid_passes(self) -> None:
         self.assertEqual(validate_brief(sample_brief()), [])
