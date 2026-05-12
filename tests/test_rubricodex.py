@@ -389,6 +389,22 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result, {})
 
+    def test_hook_matrix_readiness_ignores_validation_run_prompt(self) -> None:
+        init_project(self.root)
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), sample_matrix())
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex run tests",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
     def test_hook_matrix_readiness_resolves_project_root_from_subdirectory(self) -> None:
         init_project(self.root)
         write_json(intent_path(self.root), sample_brief())
@@ -455,6 +471,21 @@ class RubricodexContractTests(unittest.TestCase):
                 )
 
                 self.assertEqual(result, {})
+
+    def test_hook_completion_ignores_final_non_completion_phrase(self) -> None:
+        init_project(self.root)
+        run_dir(self.root, "example-v0.1").mkdir(parents=True)
+
+        result = evaluate_gate(
+            "completion-claim",
+            {
+                "hook_event_name": "Stop",
+                "last_assistant_message": "One final thought before I continue.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
 
     def test_brief_valid_passes(self) -> None:
         self.assertEqual(validate_brief(sample_brief()), [])
