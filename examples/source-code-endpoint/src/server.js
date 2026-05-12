@@ -4,7 +4,7 @@ export function createApp() {
   return http.createServer(createRequestHandler());
 }
 
-export function createRequestHandler() {
+export function createRequestHandler({ now = () => new Date() } = {}) {
   const widgets = new Map();
   let nextId = 1;
 
@@ -26,7 +26,8 @@ export function createRequestHandler() {
 
         const widget = {
           id: String(nextId++),
-          name: body.name.trim()
+          name: body.name.trim(),
+          createdAt: now().toISOString()
         };
 
         widgets.set(widget.id, widget);
