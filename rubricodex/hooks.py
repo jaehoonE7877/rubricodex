@@ -33,11 +33,23 @@ RAW_STORAGE_TERMS = (
     "unredacted command output",
 )
 STORE_TERMS = ("store", "save", "commit", "write", "persist", "record", "저장", "커밋", "기록")
-IMPLEMENT_TERMS = ("implement", "execute", "handoff", "start coding", "구현", "실행", "진행")
-ENGLISH_COMPLETION_TERMS = ("complete", "completed", "done", "passed")
+IMPLEMENT_TERMS = ("implement", "handoff", "start coding", "start implementation", "begin implementation", "구현")
+ENGLISH_COMPLETION_TERMS = ("complete", "completed")
 KOREAN_COMPLETION_TERMS = ("완료", "준비", "통과")
+EXECUTE_CONTEXT_PATTERN = re.compile(
+    r"\b(?:execute|proceed)\b[^\n.!?]{0,60}\b(?:task|work|implementation|change|changes|feature|fix|goal)\b"
+    r"|\b(?:task|work|implementation|change|changes|feature|fix|goal)\b[^\n.!?]{0,60}\b(?:execute|proceed)\b",
+    re.IGNORECASE,
+)
+KOREAN_IMPLEMENTATION_CONTEXT_PATTERN = re.compile(r"(?:작업|개발|변경)[^\n.!?]{0,20}(?:진행|실행)")
 COMPLETION_TERM_PATTERN = re.compile(
     r"\b(?:" + "|".join(re.escape(term) for term in ENGLISH_COMPLETION_TERMS) + r")\b",
+    re.IGNORECASE,
+)
+DONE_PASSED_COMPLETION_PATTERN = re.compile(
+    r"\b(?:rubricodex|task|work|implementation|pr|branch|changes?)\b[^\n.!?]{0,80}\b(?:done|passed)\b"
+    r"|\b(?:done|passed)\b[^\n.!?]{0,80}\b(?:rubricodex|task|work|implementation|pr|branch|changes?)\b"
+    r"|\ball\s+tests\s+passed\b",
     re.IGNORECASE,
 )
 READY_COMPLETION_PATTERN = re.compile(
@@ -72,9 +84,22 @@ def _is_rubricodex_prompt(text: str) -> bool:
     return "@rubricodex" in lowered or "rubricodex" in lowered
 
 
+def _is_implementation_handoff(text: str) -> bool:
+    return (
+        _contains_any(text, IMPLEMENT_TERMS)
+        or EXECUTE_CONTEXT_PATTERN.search(text) is not None
+        or KOREAN_IMPLEMENTATION_CONTEXT_PATTERN.search(text) is not None
+    )
+
+
+def _has_done_or_passed_completion(text: str) -> bool:
+    return DONE_PASSED_COMPLETION_PATTERN.search(text) is not None
+
+
 def _is_completion_claim(text: str) -> bool:
     return (
         COMPLETION_TERM_PATTERN.search(text) is not None
+        or _has_done_or_passed_completion(text)
         or READY_COMPLETION_PATTERN.search(text) is not None
         or _contains_any(text, KOREAN_COMPLETION_TERMS)
     )
@@ -158,7 +183,7 @@ def evaluate_matrix_readiness(payload: dict[str, Any]) -> dict[str, Any]:
     prompt = str(payload.get("prompt") or "")
     if not artifact_root(root).exists() or not _is_rubricodex_prompt(prompt):
         return {}
-    if not _contains_any(prompt, IMPLEMENT_TERMS):
+    if not _is_implementation_handoff(prompt):
         return {}
 
     run_id = _run_id_from_prompt(prompt, root)
