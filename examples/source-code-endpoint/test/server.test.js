@@ -3,7 +3,10 @@ import { Readable } from "node:stream";
 import { test } from "node:test";
 import { createRequestHandler } from "../src/server.js";
 
-const handler = createRequestHandler();
+const fixedNow = "2026-05-11T00:00:00.000Z";
+const handler = createRequestHandler({
+  now: () => new Date(fixedNow)
+});
 
 test("GET /health returns ok", async () => {
   const response = await invoke("GET", "/health");
@@ -19,7 +22,8 @@ test("POST /api/widgets creates a widget", async () => {
   assert.deepEqual(response.body, {
     widget: {
       id: "1",
-      name: "alpha"
+      name: "alpha",
+      createdAt: fixedNow
     }
   });
 });

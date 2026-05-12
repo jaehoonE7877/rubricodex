@@ -88,6 +88,6 @@
   ],
   "method": "gqe-r-lite",
   "mode": "standard",
-  "rubricodex_version": "0.1.0",
+  "rubricodex_version": "1.0.1",
   "schema_version": "rubricodex.v0.1"
 }

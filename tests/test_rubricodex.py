@@ -8,6 +8,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
+from rubricodex import __version__
 from rubricodex.artifacts import (
     APP_CARDS_TYPE,
     APP_COLLECTION_TYPE,
@@ -887,6 +888,23 @@ class RubricodexContractTests(unittest.TestCase):
         cards["raw_transcript"] = "do not store this"
         self.assertTrue(validate_app_session(session))
         self.assertTrue(validate_app_cards(cards))
+
+    def test_example_fixture_versions_match_package_version(self) -> None:
+        fixture_root = REPO_ROOT / "examples" / "source-code-endpoint" / ".rubricodex"
+        versioned_files = []
+
+        for path in fixture_root.rglob("*.json"):
+            artifact = read_json(path)
+            if "rubricodex_version" not in artifact:
+                continue
+            versioned_files.append(path)
+            self.assertEqual(
+                artifact["rubricodex_version"],
+                __version__,
+                f"{path.relative_to(REPO_ROOT)} has stale rubricodex_version",
+            )
+
+        self.assertTrue(versioned_files)
 
     def test_app_session_and_cards_reject_path_segment_ids(self) -> None:
         for unsafe in ("nested/session", "../session", "/tmp/session", "nested\\session"):
