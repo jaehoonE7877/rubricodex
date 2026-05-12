@@ -1,0 +1,20 @@
+{
+  "name": "rubricodex",
+  "interface": {
+    "displayName": "Rubricodex"
+  },
+  "plugins": [
+    {
+      "name": "rubricodex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/rubricodex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
