@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/scorecard.schema.json",
+  "title": "Rubricodex Scorecard",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "mode", "run_id", "scoring_model", "decision", "counts", "results"],
+  "not": { "anyOf": [{ "required": ["total_score"] }, { "required": ["threshold"] }] },
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.scorecard" },
+    "rubricodex_version": { "type": "string" },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "scoring_model": { "const": "counts-v0.1" },
+    "decision": { "enum": ["pass", "pass_with_warnings", "needs_retune", "fail"] },
+    "counts": { "type": "object" },
+    "results": { "type": "array" }
+  }
+}

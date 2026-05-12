@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import tempfile
 import unittest
@@ -9,6 +10,8 @@ from io import StringIO
 from pathlib import Path
 
 from rubricodex import __version__
+from rubricodex.hooks import evaluate_gate
+from rubricodex.schemas import load_schema, schema_index, schema_path
 from rubricodex.artifacts import (
     APP_CARDS_TYPE,
     APP_COLLECTION_TYPE,
@@ -84,7 +87,7 @@ def sample_brief(mode: str = "standard") -> dict:
         "blocks": {
             "purpose": "Add a POST /api/widgets endpoint.",
             "desired_outcome": "Valid widget input returns a 201 response with a persisted widget object.",
-            "deliverable_shape": "Small Express endpoint plus node:test coverage.",
+            "deliverable_shape": "Small Node built-in HTTP endpoint plus node:test coverage.",
             "reference_context": ["examples/source-code-endpoint/src/server.js", "examples/source-code-endpoint/test/server.test.js"],
             "scope_in": ["POST /api/widgets", "name validation", "happy path and invalid input tests"],
             "scope_out": ["database persistence", "auth", "frontend UI"],
@@ -261,14 +264,228 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue((self.root / ".rubricodex" / "config.json").is_file())
 
-    def test_plugin_has_only_manifest_and_skill_surface(self) -> None:
+    def test_plugin_has_manifest_skill_and_hook_surface(self) -> None:
         plugin_root = REPO_ROOT / "plugins/rubricodex"
         self.assertTrue((plugin_root / ".codex-plugin/plugin.json").is_file())
         self.assertTrue((plugin_root / "skills/rubricodex/SKILL.md").is_file())
+        self.assertTrue((plugin_root / "hooks/hooks.json").is_file())
+        self.assertTrue((plugin_root / "HOOKS.md").is_file())
         self.assertFalse((plugin_root / ".mcp.json").exists())
         self.assertFalse((plugin_root / ".app.json").exists())
         self.assertFalse((plugin_root / "hooks.json").exists())
-        self.assertFalse((plugin_root / "hooks").exists())
+
+        manifest = json.loads((plugin_root / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["hooks"], "./hooks/hooks.json")
+        hooks_config = json.loads((plugin_root / "hooks/hooks.json").read_text(encoding="utf-8"))
+        self.assertIn("UserPromptSubmit", hooks_config["hooks"])
+        self.assertIn("Stop", hooks_config["hooks"])
+        serialized = json.dumps(hooks_config)
+        self.assertIn("rubricodex hook gate intake-boundary", serialized)
+        self.assertIn("rubricodex hook gate matrix-readiness", serialized)
+        self.assertIn("rubricodex hook gate completion-claim", serialized)
+
+    def test_core_artifact_schemas_are_available(self) -> None:
+        schemas = schema_index()
+
+        for artifact_type in (
+            BRIEF_TYPE,
+            MATRIX_TYPE,
+            EVIDENCE_TYPE,
+            SCORECARD_TYPE,
+            RUN_MANIFEST_TYPE,
+            PROBE_PLAN_TYPE,
+            PROBE_RESULT_TYPE,
+            APP_SESSION_TYPE,
+            APP_CARDS_TYPE,
+            APP_COLLECTION_TYPE,
+            ORCHESTRATOR_TYPE,
+        ):
+            with self.subTest(artifact_type=artifact_type):
+                self.assertIn(artifact_type, schemas)
+                self.assertTrue(schema_path(artifact_type).is_file())
+                self.assertEqual(load_schema(artifact_type)["$id"], schemas[artifact_type])
+
+    def test_committed_fixture_artifacts_have_schema_coverage(self) -> None:
+        schemas = schema_index()
+        fixture_root = REPO_ROOT / "examples" / "source-code-endpoint" / ".rubricodex"
+        covered = []
+
+        for path in fixture_root.rglob("*.json"):
+            artifact = read_json(path)
+            artifact_type = artifact.get("artifact_type")
+            if artifact_type in schemas:
+                covered.append(path)
+
+        self.assertGreaterEqual(len(covered), 12)
+
+    def test_cli_schema_list_and_show(self) -> None:
+        with redirect_stdout(StringIO()) as list_stdout:
+            list_exit = cli_main(["schema", "list"])
+        with redirect_stdout(StringIO()) as show_stdout:
+            show_exit = cli_main(["schema", "show", "--artifact-type", MATRIX_TYPE])
+
+        self.assertEqual(list_exit, 0)
+        self.assertEqual(show_exit, 0)
+        self.assertIn(MATRIX_TYPE, list_stdout.getvalue())
+        self.assertEqual(json.loads(show_stdout.getvalue())["title"], "Rubricodex Evaluation Matrix")
+
+    def test_cli_schema_invalid_inputs_return_failure_json(self) -> None:
+        cases = [
+            ["schema", "show", "--artifact-type", "nope"],
+            ["schema", "list", "--schema-version", "v0.2"],
+        ]
+
+        for argv in cases:
+            with self.subTest(argv=argv):
+                with redirect_stdout(StringIO()) as stdout:
+                    exit_code = cli_main(argv)
+
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(result["status"], "fail")
+                self.assertIn("$.schema", {issue["path"] for issue in result["issues"]})
+
+    def test_hook_intake_blocks_raw_storage_prompt(self) -> None:
+        result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex store the raw transcript and raw command output in the repo.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("raw", result["reason"])
+
+    def test_hook_matrix_readiness_blocks_implementation_without_lock(self) -> None:
+        init_project(self.root)
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), sample_matrix())
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex implement the task now.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("matrix lock", result["reason"])
+
+    def test_hook_matrix_readiness_ignores_untargeted_prompt_in_initialized_project(self) -> None:
+        init_project(self.root)
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "run tests",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_ignores_validation_run_prompt(self) -> None:
+        init_project(self.root)
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), sample_matrix())
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex run tests",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_resolves_project_root_from_subdirectory(self) -> None:
+        init_project(self.root)
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), sample_matrix())
+        child = self.root / "src"
+        child.mkdir()
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex implement the task now.",
+                "cwd": str(child),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("matrix lock", result["reason"])
+
+    def test_hook_matrix_readiness_uses_taskpack_mode(self) -> None:
+        draft = draft_harness(self.root, "micro-run", "오타 문구 수정", mode="micro")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex implement --run-id micro-run",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(draft["mode"], "micro")
+        self.assertEqual(result, {})
+
+    def test_hook_completion_blocks_claim_with_missing_artifacts(self) -> None:
+        init_project(self.root)
+        run_dir(self.root, "example-v0.1").mkdir(parents=True)
+
+        result = evaluate_gate(
+            "completion-claim",
+            {
+                "hook_event_name": "Stop",
+                "last_assistant_message": "Rubricodex is complete and ready.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("missing", result["reason"])
+
+    def test_hook_completion_ignores_non_completion_ready_phrases(self) -> None:
+        init_project(self.root)
+        run_dir(self.root, "example-v0.1").mkdir(parents=True)
+
+        for message in ("I am already investigating this.", "I am ready to investigate."):
+            with self.subTest(message=message):
+                result = evaluate_gate(
+                    "completion-claim",
+                    {
+                        "hook_event_name": "Stop",
+                        "last_assistant_message": message,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result, {})
+
+    def test_hook_completion_ignores_final_non_completion_phrase(self) -> None:
+        init_project(self.root)
+        run_dir(self.root, "example-v0.1").mkdir(parents=True)
+
+        result = evaluate_gate(
+            "completion-claim",
+            {
+                "hook_event_name": "Stop",
+                "last_assistant_message": "One final thought before I continue.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
 
     def test_brief_valid_passes(self) -> None:
         self.assertEqual(validate_brief(sample_brief()), [])

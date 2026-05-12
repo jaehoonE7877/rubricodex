@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/run-manifest.schema.json",
+  "title": "Rubricodex Run Manifest",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "mode", "run_id", "executor", "execution_mode", "raw_output_stored", "result_summary", "command_results", "changed_files", "verification_commands"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.run_manifest" },
+    "rubricodex_version": { "type": "string" },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "executor": { "const": "codex-cli-local" },
+    "execution_mode": { "enum": ["dry_run", "execute"] },
+    "raw_output_stored": { "const": false },
+    "result_summary": { "type": "string", "minLength": 1 },
+    "command_results": { "type": "array" },
+    "changed_files": { "type": "array", "items": { "type": "string" } },
+    "verification_commands": { "type": "array", "items": { "type": "string" } }
+  }
+}

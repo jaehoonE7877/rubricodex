@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v rubricodex >/dev/null 2>&1 && rubricodex hook gate intake-boundary || true",
+            "timeout": 30,
+            "statusMessage": "Checking Rubricodex intake boundary"
+          },
+          {
+            "type": "command",
+            "command": "command -v rubricodex >/dev/null 2>&1 && rubricodex hook gate matrix-readiness || true",
+            "timeout": 30,
+            "statusMessage": "Checking Rubricodex matrix readiness"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v rubricodex >/dev/null 2>&1 && rubricodex hook gate completion-claim || true",
+            "timeout": 30,
+            "statusMessage": "Checking Rubricodex completion claim"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -15,6 +15,7 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - The local runner records only a manifest and summarized evidence. Direct Codex CLI execution is opt-in via `rubricodex run local --execute`.
 - App-first artifacts store only summarized session state, decisions, card refs, and shared report/retune links.
 - `rubricodex plan draft` is for a fresh or unlocked root; it refuses to overwrite an existing locked taskpack contract.
+- The plugin is hook-ready through official Codex lifecycle config. Bundled hooks call `rubricodex hook gate ...` only when the local CLI is available; otherwise they exit successfully without output.
 
 ## Flow
 
@@ -52,6 +53,7 @@ Rubricodex is a local Codex output-quality harness. Use it to turn a vague imple
 - App cards: `.rubricodex/app/sessions/<session_id>/cards.json`
 - App collection: `.rubricodex/runs/<run_id>/app-collection.json`
 - Orchestrator: `.rubricodex/runs/<run_id>/orchestrator.json`
+- Hook design: `plugins/rubricodex/HOOKS.md`
 
 ## App Actions
 

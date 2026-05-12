@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/app-collection.schema.json",
+  "title": "Rubricodex App Collection",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "session_id", "run_id", "app_session_path", "cards_path", "report_path", "retune_goal_path", "card_count", "raw_transcript_stored"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.app_collection" },
+    "rubricodex_version": { "type": "string" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "app_session_path": { "type": "string", "minLength": 1 },
+    "cards_path": { "type": "string", "minLength": 1 },
+    "report_path": { "type": "string", "minLength": 1 },
+    "retune_goal_path": { "type": "string", "minLength": 1 },
+    "card_count": { "type": "integer", "minimum": 0 },
+    "raw_transcript_stored": { "const": false }
+  }
+}

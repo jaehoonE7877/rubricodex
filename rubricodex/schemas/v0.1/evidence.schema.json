@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/evidence.schema.json",
+  "title": "Rubricodex Evidence",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "mode", "run_id", "raw_output_stored", "evidence_items"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.evidence" },
+    "rubricodex_version": { "type": "string" },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "raw_output_stored": { "const": false },
+    "evidence_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["criterion_id", "summary", "status"],
+        "properties": {
+          "criterion_id": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["pass", "partial", "missing_evidence", "fail"] },
+          "artifact_refs": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

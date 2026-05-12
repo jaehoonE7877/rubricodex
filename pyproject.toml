@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rubricodex"
-version = "1.0.1"
+version = "1.0.2"
 description = "Codex output-quality harness for bounded goals, evidence, scorecards, and retune instructions."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,3 +17,6 @@ rubricodex = "rubricodex.cli:main"
 
 [tool.setuptools]
 packages = ["rubricodex"]
+
+[tool.setuptools.package-data]
+rubricodex = ["schemas/v0.1/*.schema.json"]

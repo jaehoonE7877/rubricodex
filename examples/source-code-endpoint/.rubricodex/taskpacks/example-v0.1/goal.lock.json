@@ -1,7 +1,7 @@
 {
   "artifact_type": "rubricodex.goal_lock",
-  "brief_sha256": "a13a7238b71e05f842e65203a62bb39cb2248c0e783c7b5a023b076818d01352",
-  "created_at": "2026-05-12T01:44:45Z",
+  "brief_sha256": "001e6401cef809009ff83edef0ad53a8703d75dc6d122b25c6a25f308a8735ef",
+  "created_at": "2026-05-12T06:54:57Z",
   "executor": "codex-cli-goal",
   "goal_sha256": "4b525c43c6fc8022a1e812249358bdcd508e38513c4924277922d2a4d30e14bc",
   "guidance_sha256": "89abd8607c07d24d7d5be2a1e937bb7cb00892f36f357a5b84266d6b2aae3251",
@@ -61,13 +61,13 @@
       "external services"
     ]
   },
-  "matrix_sha256": "b2a853a2f29d05e11611117f020bff09965a9abfa1a52bcd4f89ef3254507004",
+  "matrix_sha256": "166a48800cf49f8923fc9066c9e046c0cf1538ead242ce22d3b34272e9f4e09f",
   "mode": "standard",
   "revision": {
-    "approved_at": "2026-05-12T01:44:45Z",
-    "reason": "Synchronize fixture artifacts with Rubricodex 1.0.1."
+    "approved_at": "2026-05-12T06:54:57Z",
+    "reason": "v1.0.2 package version refresh; no artifact contract shape change."
   },
-  "rubricodex_version": "1.0.1",
+  "rubricodex_version": "1.0.2",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1"
 }

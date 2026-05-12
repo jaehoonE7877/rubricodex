@@ -34,6 +34,8 @@ from .artifacts import (
     write_report,
     intent_path,
 )
+from .hooks import evaluate_gate
+from .schemas import load_schema, schema_index, schema_path
 
 
 def _print_json(payload: dict) -> None:
@@ -63,6 +65,8 @@ def _global_mode(argv: list[str]) -> str | None:
         "probe",
         "app",
         "orchestrate",
+        "schema",
+        "hook",
     }
     index = 0
     while index < len(argv):
@@ -306,6 +310,45 @@ def cmd_orchestrate_status(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "complete" else 1
 
 
+def cmd_schema_list(args: argparse.Namespace) -> int:
+    schemas = schema_index(args.schema_version)
+    _print_json(_result("pass", schema_version=args.schema_version, schemas=schemas))
+    return 0
+
+
+def cmd_schema_show(args: argparse.Namespace) -> int:
+    schema = load_schema(args.artifact_type, args.schema_version)
+    _print_json(schema)
+    return 0
+
+
+def cmd_schema_path(args: argparse.Namespace) -> int:
+    path = schema_path(args.artifact_type, args.schema_version)
+    _print_json(
+        _result(
+            "pass",
+            artifact_type=args.artifact_type,
+            schema_version=args.schema_version,
+            path=str(path),
+        )
+    )
+    return 0
+
+
+def cmd_hook_gate(args: argparse.Namespace) -> int:
+    try:
+        raw_input = sys.stdin.read()
+        payload = json.loads(raw_input) if raw_input.strip() else {}
+        if not isinstance(payload, dict):
+            payload = {}
+    except json.JSONDecodeError:
+        payload = {}
+    result = evaluate_gate(args.gate, payload)
+    if result:
+        print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rubricodex")
     parser.add_argument("--root", default=".", help="Project root containing .rubricodex")
@@ -467,6 +510,29 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(orchestrate_status_parser)
     orchestrate_status_parser.add_argument("--run-id", "--run", dest="run_id", required=True)
     orchestrate_status_parser.set_defaults(func=cmd_orchestrate_status)
+
+    schema = subparsers.add_parser("schema")
+    schema_sub = schema.add_subparsers(dest="schema_command", required=True)
+    schema_list = schema_sub.add_parser("list")
+    schema_list.add_argument("--schema-version", default="v0.1")
+    schema_list.set_defaults(func=cmd_schema_list)
+    schema_show = schema_sub.add_parser("show")
+    schema_show.add_argument("--artifact-type", required=True)
+    schema_show.add_argument("--schema-version", default="v0.1")
+    schema_show.set_defaults(func=cmd_schema_show)
+    schema_path_parser = schema_sub.add_parser("path")
+    schema_path_parser.add_argument("--artifact-type", required=True)
+    schema_path_parser.add_argument("--schema-version", default="v0.1")
+    schema_path_parser.set_defaults(func=cmd_schema_path)
+
+    hook = subparsers.add_parser("hook")
+    hook_sub = hook.add_subparsers(dest="hook_command", required=True)
+    hook_gate = hook_sub.add_parser("gate")
+    hook_gate.add_argument(
+        "gate",
+        choices=("intake-boundary", "matrix-readiness", "completion-claim"),
+    )
+    hook_gate.set_defaults(func=cmd_hook_gate)
     return parser
 
 
@@ -481,6 +547,9 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except ArtifactError as error:
         _print_json(_result("fail", issues=[issue.as_dict() for issue in error.issues]))
+        return 1
+    except (KeyError, ValueError) as error:
+        _print_json(_result("fail", issues=[{"path": "$.schema", "message": str(error)}]))
         return 1
 
 

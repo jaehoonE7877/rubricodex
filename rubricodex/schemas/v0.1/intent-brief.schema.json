@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rubricodex.dev/schemas/v0.1/intent-brief.schema.json",
+  "title": "Rubricodex Intent Brief",
+  "type": "object",
+  "required": ["schema_version", "artifact_type", "rubricodex_version", "mode", "blocks"],
+  "properties": {
+    "schema_version": { "const": "rubricodex.v0.1" },
+    "artifact_type": { "const": "rubricodex.intent_brief" },
+    "rubricodex_version": { "type": "string" },
+    "mode": { "enum": ["micro", "quick", "standard", "strict", "audit"] },
+    "task_kind": { "type": "string" },
+    "blocks": {
+      "type": "object",
+      "required": [
+        "purpose",
+        "desired_outcome",
+        "deliverable_shape",
+        "reference_context",
+        "scope_in",
+        "scope_out",
+        "working_rules",
+        "evaluation_basis",
+        "done_when"
+      ],
+      "properties": {
+        "purpose": { "type": "string", "minLength": 1 },
+        "desired_outcome": { "type": "string", "minLength": 1 },
+        "deliverable_shape": { "type": "string", "minLength": 1 },
+        "reference_context": { "type": "array", "items": { "type": "string" } },
+        "scope_in": { "type": "array", "items": { "type": "string" } },
+        "scope_out": { "type": "array", "items": { "type": "string" } },
+        "working_rules": { "type": "array", "items": { "type": "string" } },
+        "evaluation_basis": { "type": "array", "items": { "type": "string" } },
+        "done_when": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

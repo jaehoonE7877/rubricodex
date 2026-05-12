@@ -28,11 +28,32 @@ test("POST /api/widgets creates a widget", async () => {
   });
 });
 
-test("POST /api/widgets rejects missing names", async () => {
+test("POST /api/widgets rejects blank names", async () => {
   const response = await invoke("POST", "/api/widgets", { name: " " });
 
   assert.equal(response.status, 400);
   assert.equal(response.body.error, "invalid_widget");
+});
+
+test("POST /api/widgets rejects missing names", async () => {
+  const response = await invoke("POST", "/api/widgets", {});
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, "invalid_widget");
+});
+
+test("POST /api/widgets rejects non-string names", async () => {
+  const response = await invoke("POST", "/api/widgets", { name: 42 });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, "invalid_widget");
+});
+
+test("POST /api/widgets rejects invalid JSON", async () => {
+  const response = await invoke("POST", "/api/widgets", undefined, "{");
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error, "invalid_json");
 });
 
 test("unknown routes return 404", async () => {
@@ -42,8 +63,9 @@ test("unknown routes return 404", async () => {
   assert.equal(response.body.error, "not_found");
 });
 
-async function invoke(method, url, body) {
-  const req = Readable.from(body === undefined ? [] : [JSON.stringify(body)]);
+async function invoke(method, url, body, rawBody) {
+  const chunks = rawBody !== undefined ? [rawBody] : body === undefined ? [] : [JSON.stringify(body)];
+  const req = Readable.from(chunks);
   req.method = method;
   req.url = url;
 
