@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./assets/codex-plugin/logo.png" alt="Rubricodex logo" width="128" />
+  <img src="./plugins/rubricodex/assets/rubricodex-plugin-icon.png" alt="Rubricodex logo" width="128" />
 
   <h1>Rubricodex</h1>
 

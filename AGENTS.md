@@ -11,7 +11,7 @@
 ## Repo Map
 
 - `README.md`: 짧은 프로젝트 입구입니다. Rubricodex 핵심 가치, 기본 사용법, Notion Canonical SSoT 링크만 유지합니다.
-- `assets/`: README 또는 Notion 문서에서 참조하는 문서용 이미지 자산을 둡니다.
+- `plugins/rubricodex/assets/`: README와 Codex plugin marketplace에서 사용하는 Rubricodex icon 자산을 둡니다.
 - `.rubricodex/`: 이후 CLI/example이 생성할 runtime artifact 기준 경로입니다. 현재 없더라도 다른 이름으로 대체하지 않습니다.
 
 ## Change Rules
