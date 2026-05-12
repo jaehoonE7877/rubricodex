@@ -394,16 +394,18 @@ class RubricodexContractTests(unittest.TestCase):
         write_json(intent_path(self.root), sample_brief())
         write_json(matrix_path(self.root), sample_matrix())
 
-        result = evaluate_gate(
-            "matrix-readiness",
-            {
-                "hook_event_name": "UserPromptSubmit",
-                "prompt": "@Rubricodex run tests",
-                "cwd": str(self.root),
-            },
-        )
+        for prompt in ("@Rubricodex run tests", "@Rubricodex execute tests", "@Rubricodex 테스트 실행"):
+            with self.subTest(prompt=prompt):
+                result = evaluate_gate(
+                    "matrix-readiness",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
 
-        self.assertEqual(result, {})
+                self.assertEqual(result, {})
 
     def test_hook_matrix_readiness_resolves_project_root_from_subdirectory(self) -> None:
         init_project(self.root)
@@ -476,16 +478,22 @@ class RubricodexContractTests(unittest.TestCase):
         init_project(self.root)
         run_dir(self.root, "example-v0.1").mkdir(parents=True)
 
-        result = evaluate_gate(
-            "completion-claim",
-            {
-                "hook_event_name": "Stop",
-                "last_assistant_message": "One final thought before I continue.",
-                "cwd": str(self.root),
-            },
-        )
+        for message in (
+            "One final thought before I continue.",
+            "Tests passed; continuing with remaining artifacts.",
+            "One setup step is done, then I will collect evidence.",
+        ):
+            with self.subTest(message=message):
+                result = evaluate_gate(
+                    "completion-claim",
+                    {
+                        "hook_event_name": "Stop",
+                        "last_assistant_message": message,
+                        "cwd": str(self.root),
+                    },
+                )
 
-        self.assertEqual(result, {})
+                self.assertEqual(result, {})
 
     def test_brief_valid_passes(self) -> None:
         self.assertEqual(validate_brief(sample_brief()), [])

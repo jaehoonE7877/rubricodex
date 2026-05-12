@@ -33,8 +33,8 @@ RAW_STORAGE_TERMS = (
     "unredacted command output",
 )
 STORE_TERMS = ("store", "save", "commit", "write", "persist", "record", "저장", "커밋", "기록")
-IMPLEMENT_TERMS = ("implement", "execute", "handoff", "start coding", "구현", "실행", "진행")
-ENGLISH_COMPLETION_TERMS = ("complete", "completed", "done", "passed")
+IMPLEMENT_TERMS = ("implement", "handoff", "start coding", "start implementation", "begin implementation", "구현")
+ENGLISH_COMPLETION_TERMS = ("complete", "completed")
 KOREAN_COMPLETION_TERMS = ("완료", "준비", "통과")
 COMPLETION_TERM_PATTERN = re.compile(
     r"\b(?:" + "|".join(re.escape(term) for term in ENGLISH_COMPLETION_TERMS) + r")\b",
