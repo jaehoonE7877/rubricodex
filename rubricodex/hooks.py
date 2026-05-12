@@ -50,8 +50,16 @@ READY_COMPLETION_PATTERN = re.compile(
 def _cwd(payload: dict[str, Any]) -> Path:
     cwd = payload.get("cwd")
     if isinstance(cwd, str) and cwd.strip():
-        return Path(cwd)
-    return Path.cwd()
+        return _project_root(Path(cwd))
+    return _project_root(Path.cwd())
+
+
+def _project_root(cwd: Path) -> Path:
+    root = cwd.expanduser().resolve()
+    for candidate in (root, *root.parents):
+        if artifact_root(candidate).exists():
+            return candidate
+    return root
 
 
 def _contains_any(text: str, terms: tuple[str, ...]) -> bool:

@@ -548,6 +548,9 @@ def main(argv: list[str] | None = None) -> int:
     except ArtifactError as error:
         _print_json(_result("fail", issues=[issue.as_dict() for issue in error.issues]))
         return 1
+    except (KeyError, ValueError) as error:
+        _print_json(_result("fail", issues=[{"path": "$.schema", "message": str(error)}]))
+        return 1
 
 
 if __name__ == "__main__":

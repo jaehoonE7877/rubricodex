@@ -329,6 +329,22 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn(MATRIX_TYPE, list_stdout.getvalue())
         self.assertEqual(json.loads(show_stdout.getvalue())["title"], "Rubricodex Evaluation Matrix")
 
+    def test_cli_schema_invalid_inputs_return_failure_json(self) -> None:
+        cases = [
+            ["schema", "show", "--artifact-type", "nope"],
+            ["schema", "list", "--schema-version", "v0.2"],
+        ]
+
+        for argv in cases:
+            with self.subTest(argv=argv):
+                with redirect_stdout(StringIO()) as stdout:
+                    exit_code = cli_main(argv)
+
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(result["status"], "fail")
+                self.assertIn("$.schema", {issue["path"] for issue in result["issues"]})
+
     def test_hook_intake_blocks_raw_storage_prompt(self) -> None:
         result = evaluate_gate(
             "intake-boundary",
@@ -372,6 +388,25 @@ class RubricodexContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_resolves_project_root_from_subdirectory(self) -> None:
+        init_project(self.root)
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), sample_matrix())
+        child = self.root / "src"
+        child.mkdir()
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex implement the task now.",
+                "cwd": str(child),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("matrix lock", result["reason"])
 
     def test_hook_matrix_readiness_uses_taskpack_mode(self) -> None:
         draft = draft_harness(self.root, "micro-run", "오타 문구 수정", mode="micro")
