@@ -518,7 +518,12 @@ class RubricodexContractTests(unittest.TestCase):
         init_project(self.root)
         run_dir(self.root, "example-v0.1").mkdir(parents=True)
 
-        for message in ("Rubricodex is done.", "All tests passed."):
+        for message in (
+            "Rubricodex is done.",
+            "All tests passed.",
+            "All tests passed. Next steps: open a PR.",
+            "The task is done. Next, I will open a PR.",
+        ):
             with self.subTest(message=message):
                 result = evaluate_gate(
                     "completion-claim",

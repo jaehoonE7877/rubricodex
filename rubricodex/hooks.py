@@ -52,10 +52,6 @@ DONE_PASSED_COMPLETION_PATTERN = re.compile(
     r"|\ball\s+tests\s+passed\b",
     re.IGNORECASE,
 )
-PROGRESS_CONTINUATION_PATTERN = re.compile(
-    r"\b(?:continuing|continue|remaining|still|next|then\s+i\s+will|before\s+i\s+continue)\b",
-    re.IGNORECASE,
-)
 READY_COMPLETION_PATTERN = re.compile(
     r"\b(?:rubricodex|task|implementation|work|pr|branch|changes?)\b[^\n.!?]{0,80}\bready\b"
     r"|\bready\b\s+(?:for\s+(?:review|merge|release|pr)|to\s+(?:ship|merge|release|submit))\b",
@@ -97,8 +93,6 @@ def _is_implementation_handoff(text: str) -> bool:
 
 
 def _has_done_or_passed_completion(text: str) -> bool:
-    if PROGRESS_CONTINUATION_PATTERN.search(text):
-        return False
     return DONE_PASSED_COMPLETION_PATTERN.search(text) is not None
 
 
