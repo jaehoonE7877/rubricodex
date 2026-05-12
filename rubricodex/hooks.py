@@ -7,6 +7,7 @@ from typing import Any
 
 from .artifacts import (
     ArtifactError,
+    DEFAULT_MODE,
     artifact_root,
     goal_lock_path,
     intent_path,
@@ -109,6 +110,14 @@ def _latest_run_id(root: Path) -> str | None:
     return candidates[0].name
 
 
+def _matrix_lock_mode(root: Path, run_id: str) -> str:
+    for path in (matrix_path(root), goal_lock_path(root, run_id)):
+        mode = read_json(path).get("mode")
+        if isinstance(mode, str) and mode.strip():
+            return mode
+    return DEFAULT_MODE
+
+
 def _summarize_status(status: dict[str, Any]) -> str:
     parts: list[str] = []
     missing = status.get("missing")
@@ -158,7 +167,7 @@ def evaluate_matrix_readiness(payload: dict[str, Any]) -> dict[str, Any]:
     if missing:
         return _block("Rubricodex matrix readiness missing matrix lock artifacts: " + ", ".join(missing))
     try:
-        lock = verify_matrix_lock(root, run_id)
+        lock = verify_matrix_lock(root, run_id, mode=_matrix_lock_mode(root, run_id))
     except ArtifactError as error:
         details = ", ".join(issue.path for issue in error.issues[:6])
         return _block("Rubricodex matrix readiness failed: " + details)

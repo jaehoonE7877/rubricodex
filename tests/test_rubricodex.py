@@ -373,6 +373,21 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result, {})
 
+    def test_hook_matrix_readiness_uses_taskpack_mode(self) -> None:
+        draft = draft_harness(self.root, "micro-run", "오타 문구 수정", mode="micro")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex implement --run-id micro-run",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(draft["mode"], "micro")
+        self.assertEqual(result, {})
+
     def test_hook_completion_blocks_claim_with_missing_artifacts(self) -> None:
         init_project(self.root)
         run_dir(self.root, "example-v0.1").mkdir(parents=True)
