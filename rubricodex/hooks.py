@@ -142,7 +142,7 @@ ENGLISH_ACTION_NOWHERE_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")(?:을|를|도|이|가|은|는)?\s*(?P<form>해야\s*합니다|해야합니다|해도\s*(?:됩니다|돼요|되요|된다|됨|괜찮습니다|좋습니다|가능합니다)|합니다|하십시오|합시다|해주시고|해주고|해줘|해주세요|하세요|하라|해라|해서|해야|해 주세요|해|부탁|하고\s*나서|하고|한\s*다음|한\s*뒤|한\s*후|후|"
+    + r")(?:을|를|도|이|가|은|는)?\s*(?P<form>해야\s*합니다|해야합니다|해도\s*(?:됩니다|돼요|되요|된다|됨|괜찮습니다|좋습니다|가능합니다)|해주시기\s*바랍니다|해주십시오|하여\s*주세요|하시오|하길\s*바랍니다|되게|합니다|하십시오|합시다|해주시고|해주고|해줘|해주세요|하세요|하라|해라|해서|해야|해 주세요|해|부탁|하고\s*나서|하고|한\s*다음|한\s*뒤|한\s*후|후|"
     r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
     r"\s*(?:$|[.!?。:：]|\s)",
 )
@@ -192,7 +192,7 @@ SAFE_FOLLOWUP_OBJECT_PATTERN = re.compile(
 SAFE_BROAD_ACTION_OBJECT_PATTERN = re.compile(
     r"^\s+(?:a\s+|an\s+|the\s+)?"
     r"(?:tests?|test\s+cases?|test\s+case|fixtures?|test\s+fixtures?|function|logic|validator|code|hook|"
-    r"solution|note|section|docs?\s+section|policy|rules?)\b",
+    r"solution|support|note|section|docs?\s+section|policy|rules?)\b",
     re.IGNORECASE,
 )
 SAFE_BROAD_ACTION_LANGUAGE_PATTERN = re.compile(
