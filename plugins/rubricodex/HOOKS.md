@@ -27,6 +27,7 @@ The bundled hook config is safe for plugin-only installs:
    - Adds advisory `additionalContext` for Rubricodex prompts.
    - When raw transcript, task log, or unredacted command output storage risk is detected, guidance includes the gate name, matched raw artifact categories, and matched action without echoing prompt text.
    - Raw storage enforcement lives in artifact schemas, validators, and report writer paths instead of the `UserPromptSubmit` hook.
+   - Validators reject forbidden raw fields and raw payload markers in summary/result fields.
 
 2. `rubricodex_matrix_readiness_gate`
    - Event: `UserPromptSubmit`

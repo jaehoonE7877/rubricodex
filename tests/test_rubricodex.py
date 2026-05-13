@@ -1297,6 +1297,50 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["unredacted_command_output"] = "do not store this"
         self.assertIn("$.unredacted_command_output", {issue.path for issue in validate_evidence(evidence, matrix)})
 
+    def test_artifact_validators_reject_raw_payload_markers_in_summaries(self) -> None:
+        matrix = sample_matrix()
+        evidence = sample_evidence(matrix)
+        evidence["evidence_items"][0]["summary"] = "raw transcript: user pasted the original chat."
+        self.assertIn("$.evidence_items[0].summary", {issue.path for issue in validate_evidence(evidence, matrix)})
+
+        safe_evidence = sample_evidence(matrix)
+        safe_evidence["evidence_items"][0]["summary"] = "Confirmed raw transcript/log/output storage is absent."
+        self.assertEqual(validate_evidence(safe_evidence, matrix), [])
+
+        manifest = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": RUN_MANIFEST_TYPE,
+            "rubricodex_version": "0.1.0",
+            "created_at": "2026-05-11T00:00:00Z",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "executor": "codex-cli-local",
+            "execution_mode": "dry_run",
+            "raw_output_stored": False,
+            "result_summary": "Prepared summarized handoff.",
+            "command_results": [
+                {"command": "python3 -m unittest", "exit_code": 0, "summary": "stdout: raw test output"},
+            ],
+            "changed_files": [],
+            "verification_commands": [],
+        }
+        self.assertIn("$.command_results[0].summary", {issue.path for issue in validate_run_manifest(manifest)})
+
+        probe_result = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": PROBE_RESULT_TYPE,
+            "rubricodex_version": "0.1.0",
+            "created_at": "2026-05-11T00:00:00Z",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "criterion_id": "C-01",
+            "status": "probe_failure",
+            "summary": "raw command output: failing command details",
+            "read_only": True,
+            "raw_output_stored": False,
+        }
+        self.assertIn("$.summary", {issue.path for issue in validate_probe_result(probe_result)})
+
     def test_matrix_valid_passes(self) -> None:
         self.assertEqual(validate_matrix(sample_matrix()), [])
 
