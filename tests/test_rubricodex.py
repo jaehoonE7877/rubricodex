@@ -1297,6 +1297,17 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["unredacted_command_output"] = "do not store this"
         self.assertIn("$.unredacted_command_output", {issue.path for issue in validate_evidence(evidence, matrix)})
 
+        evidence_with_stdout = sample_evidence(matrix)
+        evidence_with_stdout["evidence_items"][0]["stdout"] = "raw command output"
+        self.assertIn(
+            "$.evidence_items[0].stdout",
+            {issue.path for issue in validate_evidence(evidence_with_stdout, matrix)},
+        )
+
+        cards = sample_app_cards()
+        cards["cards"][0]["output"] = "raw command output"
+        self.assertIn("$.cards[0].output", {issue.path for issue in validate_app_cards(cards)})
+
     def test_artifact_validators_reject_raw_payload_markers_in_summaries(self) -> None:
         matrix = sample_matrix()
         evidence = sample_evidence(matrix)
@@ -1340,6 +1351,12 @@ class RubricodexContractTests(unittest.TestCase):
 
         scorecard["results"][0]["evidence_summaries"] = None
         self.assertIn("$.results[0].evidence_summaries", {issue.path for issue in validate_scorecard(scorecard)})
+
+        scorecard["results"] = None
+        self.assertIn("$.results", {issue.path for issue in validate_scorecard(scorecard)})
+
+        scorecard["results"] = ["not an object"]
+        self.assertIn("$.results[0]", {issue.path for issue in validate_scorecard(scorecard)})
 
         manifest = {
             "schema_version": SCHEMA_VERSION,

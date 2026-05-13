@@ -144,7 +144,11 @@ FORBIDDEN_KEYS = {
     "raw_task_log",
     "raw_codex_log",
     "raw_command_output",
+    "raw_output",
+    "stderr",
+    "stdout",
     "unredacted_command_output",
+    "output",
 }
 RAW_PAYLOAD_MARKER_PATTERN = re.compile(
     r"(?im)^\s*(?:raw\s+(?:chat\s+)?transcripts?|raw\s+(?:task|codex)\s+logs?|"
@@ -934,8 +938,14 @@ def validate_scorecard(data: dict[str, Any]) -> list[ValidationIssue]:
     for key in ("total_score", "threshold"):
         if key in data:
             issues.append(ValidationIssue(f"$.{key}", f"{key} is not allowed in v0.1 scorecards"))
-    for index, result in enumerate(data.get("results", [])):
+    results = data.get("results")
+    if not isinstance(results, list):
+        issues.append(ValidationIssue("$.results", "results must be a list"))
+        return issues
+
+    for index, result in enumerate(results):
         if not isinstance(result, dict):
+            issues.append(ValidationIssue(f"$.results[{index}]", "scorecard result must be an object"))
             continue
         path = f"$.results[{index}]"
         if isinstance(result.get("reason"), str):
