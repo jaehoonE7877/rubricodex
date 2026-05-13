@@ -98,10 +98,10 @@ ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
-    r"(?:저장|커밋|기록)\s*(?:하지|하지\s+않|하지\s+마|금지|허용하지)"
+    r"(?:저장|커밋|기록)(?:을|를|도)?\s*(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지)"
 )
 KOREAN_NEGATED_STORAGE_ACTION_PATTERN = re.compile(
-    r"^(?:저장|커밋|기록)\s*(?:하지|하지\s+않|하지\s+마|금지|허용하지)"
+    r"^(?:저장|커밋|기록)(?:을|를|도)?\s*(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지)"
 )
 ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     r"(?:(?:must|should|may|can)\s+not|mustn't|shouldn't|can't|cannot|do\s+not|don't|never|"
@@ -129,7 +129,7 @@ ENGLISH_ACTION_NOWHERE_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")(?:을|를)?\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
+    + r")(?:을|를|도)?\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해주시고|해주고|해줘|해주세요|하세요|하라|해라|해서|해야|해 주세요|해|부탁|하고\s*나서|하고|한\s*다음|한\s*뒤|한\s*후|후|"
     r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
     r"\s*(?:$|[.!?。:：]|\s)",
 )
