@@ -128,7 +128,7 @@ ENGLISH_ACTION_NOWHERE_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
+    + r")(?:을|를)?\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
     r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
     r"\s*(?:$|[.!?。]|\s)",
 )
@@ -754,6 +754,11 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if forward_storage_match is None:
             forward_storage_match = _forward_korean_storage_match(clause)
         if forward_storage_match is not None:
+            if categories:
+                return {
+                    "matched_categories": ",".join(categories),
+                    "matched_action": forward_storage_match["matched_action"],
+                }
             pending_forward_storage = forward_storage_match
             pending_forward_excluded_categories = []
             continue

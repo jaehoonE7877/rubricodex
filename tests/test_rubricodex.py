@@ -375,9 +375,11 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex raw transcript 저장하도록 구현해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript를 저장합니다.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript 저장해야합니다.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장을 해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw task log 기록", "raw_task_log", "기록"),
             ("@Rubricodex raw task log 기록하는 파일을 만들어줘.", "raw_task_log", "기록"),
             ("@Rubricodex raw command output 커밋", "raw_command_output", "커밋"),
+            ("@Rubricodex raw command output 커밋을 해줘.", "raw_command_output", "커밋"),
             ("@Rubricodex raw command output 커밋하는 스크립트를 만들어줘.", "raw_command_output", "커밋"),
         ]
 
@@ -614,6 +616,13 @@ class RubricodexContractTests(unittest.TestCase):
             (
                 "@Rubricodex Save the following to evidence.json. raw command output: hello",
                 "raw_command_output",
+                "save",
+            ),
+            (
+                "@Rubricodex Save the following to evidence.json: "
+                + ("filler " * 30)
+                + "raw transcript: hello",
+                "raw_transcript",
                 "save",
             ),
             (
