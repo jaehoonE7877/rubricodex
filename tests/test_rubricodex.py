@@ -787,6 +787,26 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
                 "save",
             ),
+            (
+                "@Rubricodex raw transcript: hello. Save.",
+                "raw_transcript",
+                "save",
+            ),
+            (
+                "@Rubricodex raw command output: hello. Record.",
+                "raw_command_output",
+                "record",
+            ),
+            (
+                "@Rubricodex raw task log: hello. Commit.",
+                "raw_task_log",
+                "commit",
+            ),
+            (
+                "@Rubricodex raw transcript. Please save.",
+                "raw_transcript",
+                "save",
+            ),
         ]
 
         for prompt, category, action in cases:
@@ -835,6 +855,11 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write docs listing raw command output as forbidden.",
             "@Rubricodex include raw transcripts in the policy as disallowed items.",
             "@Rubricodex add raw transcript to the do-not-store policy.",
+            "@Rubricodex add tests for raw transcript policy.",
+            "@Rubricodex add tests for storing raw transcripts being blocked.",
+            "@Rubricodex fix the hook so storing raw transcripts is blocked.",
+            "@Rubricodex include raw transcript in the forbidden list.",
+            "@Rubricodex put raw transcript on the disallowed list.",
             "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",
             "@Rubricodex write an AGENTS policy: raw transcripts must not be stored in repo.",
             "@Rubricodex write docs: raw transcripts are not allowed to be stored.",
@@ -878,6 +903,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex analyze raw command output and write to summary.md.",
             "@Rubricodex Here is raw command output. Analyze it and write a summary.",
             "@Rubricodex Here is raw transcript: user asks for endpoint. Keep the solution simple.",
+            "@Rubricodex Here is raw transcript. Keep it simple.",
+            "@Rubricodex Here is raw transcript. Add in Korean.",
+            "@Rubricodex Here is raw transcript. Include in Korean.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 하지 말고 요약만 해줘.",
             "@Rubricodex raw transcript 저장 말고 요약해줘.",
             "@Rubricodex raw transcript 저장 없이 요약해줘.",

@@ -36,6 +36,8 @@ ENGLISH_STORAGE_ACTION_PATTERN_TEXT = (
     r"keeps?|kept|keeping)"
 )
 ENGLISH_STORAGE_GERUND_PATTERN_TEXT = r"(?:storing|saving|committing|writing|persisting|recording)"
+BROAD_ENGLISH_STORAGE_ACTIONS = {"add", "include", "put", "keep"}
+BARE_ENGLISH_STORAGE_ACTIONS = {"store", "save", "commit", "write", "persist", "record", "paste"}
 KOREAN_STORAGE_ACTIONS = ("저장", "커밋", "기록")
 IMPLEMENT_TERMS = ("implement", "handoff", "start coding", "start implementation", "begin implementation", "구현")
 ENGLISH_COMPLETION_TERMS = ("complete", "completed")
@@ -72,7 +74,8 @@ NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
     r"(?:please\s+)?(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|"
     r"can\s+not|cannot|can't|may\s+not|never|not|not\s+to\s+be|not\s+to|"
     r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|prohibited\s+from\s+being|without|"
-    r"forbid(?:s|ding)?|prohibit(?:s|ed|ing)?|ban(?:s|ned|ning)?|from\s+being)"
+    r"forbid(?:s|ding)?|prohibit(?:s|ed|ing)?|ban(?:s|ned|ning)?|from\s+being|"
+    r"blocks?|blocking|prevents?|preventing|rejects?|rejecting|disallows?|disallowing)"
     r"(?:\s+ever)?(?:\s+be)?\s+$",
     re.IGNORECASE,
 )
@@ -120,6 +123,8 @@ ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
     + r"\b"
     + r"|(?:is|are|was|were|be)\s+(?:not\s+allowed|forbidden|prohibited|disallowed)"
+    + r"\b"
+    + r"|(?:is|are|was|were|be|being)\s+(?:blocked|rejected|prevented|excluded)"
     + r"\b"
     + r"|(?:is|are|was|were|be)\s+"
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
@@ -178,6 +183,20 @@ SUMMARY_ONLY_FORWARD_OBJECT_PATTERN = re.compile(
 )
 SAFE_FOLLOWUP_OBJECT_PATTERN = re.compile(
     r"^\s+(?:the\s+|a\s+|an\s+)?(?:tests?|test\s+cases?)\b",
+    re.IGNORECASE,
+)
+SAFE_BROAD_ACTION_OBJECT_PATTERN = re.compile(
+    r"^\s+(?:a\s+|an\s+|the\s+)?"
+    r"(?:tests?|test\s+cases?|test\s+case|fixtures?|test\s+fixtures?|function|logic|validator|code|hook|"
+    r"solution|note|section|docs?\s+section|policy|rules?)\b",
+    re.IGNORECASE,
+)
+SAFE_BROAD_ACTION_LANGUAGE_PATTERN = re.compile(
+    r"^\s+in\s+(?:korean|english|japanese|spanish|french|german)\b",
+    re.IGNORECASE,
+)
+SAFE_KEEP_DIRECTION_PATTERN = re.compile(
+    r"^\s+(?:it\s+)?(?:simple|small|focused)\b|^\s+the\s+solution\s+(?:simple|small|focused)\b",
     re.IGNORECASE,
 )
 SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
@@ -571,6 +590,44 @@ def _is_safe_summary_storage_suffix(suffix: str) -> bool:
     return True
 
 
+def _is_safe_broad_storage_action(action: str, suffix: str) -> bool:
+    if action not in BROAD_ENGLISH_STORAGE_ACTIONS:
+        return False
+    if action == "keep" and SAFE_KEEP_DIRECTION_PATTERN.search(suffix) is not None:
+        return True
+    if SAFE_BROAD_ACTION_LANGUAGE_PATTERN.search(suffix) is not None:
+        return True
+    raw_matches = _raw_category_matches(suffix)
+    has_policy_context = (
+        POLICY_PROHIBITION_CONTEXT_PATTERN.search(suffix) is not None
+        or re.search(r"\b(?:blocked|rejected|prevented|excluded)\b", suffix, re.IGNORECASE) is not None
+    )
+    raw_policy_context = any(
+        _has_policy_prohibition_context_for_raw(suffix, match)
+        or re.search(
+            r"\b(?:the\s+)?(?:forbidden|disallowed|rejected|blocked|prevented|excluded)\s+(?:list|items?)\b",
+            suffix[int(match["end"]) : int(match["end"]) + 100],
+            re.IGNORECASE,
+        )
+        is not None
+        for match in raw_matches
+    )
+    if SAFE_BROAD_ACTION_OBJECT_PATTERN.search(suffix) is not None:
+        if has_policy_context or UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is None:
+            return True
+    if raw_policy_context and UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is None:
+        return True
+    return False
+
+
+def _is_bare_english_storage_imperative(action: str, prefix: str, suffix: str) -> bool:
+    if action not in BARE_ENGLISH_STORAGE_ACTIONS:
+        return False
+    if re.fullmatch(r"\s*(?:please\s+|then\s+)?", prefix, re.IGNORECASE) is None:
+        return False
+    return re.fullmatch(r"\s*[.!?。]*\s*", suffix) is not None
+
+
 def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
     safe_summary_antecedent = False
     for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
@@ -581,6 +638,8 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
             continue
         if _is_policy_doc_reference_action(action, suffix):
+            continue
+        if _is_safe_broad_storage_action(action, suffix):
             continue
         prefix_categories = _active_raw_categories(clause[max(0, english_match.start() - 120) : english_match.start()])
         full_prefix_categories = _active_raw_categories(clause[: english_match.start()])
@@ -653,8 +712,12 @@ def _cross_clause_english_storage_match(
             continue
         if _is_policy_doc_reference_action(action, suffix):
             continue
+        if _is_safe_broad_storage_action(action, suffix):
+            continue
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
+        has_unsafe_destination = UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is not None
+        has_storage_destination = has_unsafe_destination if action in BROAD_ENGLISH_STORAGE_ACTIONS else has_destination_prefix
         prefix = clause[: english_match.start()]
         has_prefix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(prefix) is not None
         safe_derived_pronoun_action = (
@@ -662,20 +725,25 @@ def _cross_clause_english_storage_match(
                 _has_safe_derived_output_before(prefix)
                 or _has_safe_analysis_destination_before(prefix, suffix)
             )
-            and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_destination_prefix)
+            and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_storage_destination)
             and RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is None
         )
         if safe_derived_pronoun_action:
             continue
         if require_raw_reference and not has_raw_reference and not has_prefix_raw_reference:
             continue
-        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_storage_destination:
             continue
-        if SAFE_FOLLOWUP_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
+        if SAFE_FOLLOWUP_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_storage_destination:
             continue
-        if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
+        if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_storage_destination:
             continue
-        if not has_raw_reference and not has_destination_prefix and not has_prefix_raw_reference:
+        if not has_raw_reference and not has_storage_destination and not has_prefix_raw_reference:
+            if _is_bare_english_storage_imperative(action, prefix, suffix):
+                return {
+                    "matched_categories": ",".join(previous_categories),
+                    "matched_action": action,
+                }
             continue
         return {
             "matched_categories": ",".join(previous_categories),
