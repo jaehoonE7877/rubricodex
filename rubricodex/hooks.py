@@ -345,6 +345,8 @@ def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
     if _has_contradicting_storage_after_raw(text, raw_start):
         return False
     body = match.groupdict().get("body") or match.groupdict().get("without_body") or ""
+    if re.search(r",|\b(?:but|however|except|instead)\b", body, re.IGNORECASE) is not None:
+        return False
     return ENGLISH_NEGATION_BOUNDARY_PATTERN.search(body) is None
 
 
@@ -614,6 +616,8 @@ def _cross_clause_english_storage_match(
         if SAFE_FOLLOWUP_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
             continue
         if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
+            continue
+        if not has_raw_reference and not has_destination_prefix:
             continue
         return {
             "matched_categories": ",".join(previous_categories),
