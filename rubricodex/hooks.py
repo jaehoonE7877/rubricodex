@@ -97,6 +97,10 @@ ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN = re.compile(
     r"(?:,|\band\b|\bthen\b|\bbut\b|\bhowever\b|\bexcept\b|\binstead\b)",
     re.IGNORECASE,
 )
+ENGLISH_TRAILING_CAVEAT_PATTERN = re.compile(
+    r"\b(?:although|though|even\s+though|while|because|since|as)\b",
+    re.IGNORECASE,
+)
 KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     r"(?:저장|커밋|기록)(?:을|를|도)?\s*(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지)"
 )
@@ -129,7 +133,7 @@ ENGLISH_ACTION_NOWHERE_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")(?:을|를|도)?\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해주시고|해주고|해줘|해주세요|하세요|하라|해라|해서|해야|해 주세요|해|부탁|하고\s*나서|하고|한\s*다음|한\s*뒤|한\s*후|후|"
+    + r")(?:을|를|도|이|가|은|는)?\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해주시고|해주고|해줘|해주세요|하세요|하라|해라|해서|해야|해 주세요|해|부탁|하고\s*나서|하고|한\s*다음|한\s*뒤|한\s*후|후|"
     r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
     r"\s*(?:$|[.!?。:：]|\s)",
 )
@@ -439,6 +443,8 @@ def _is_negated_english_raw_reference_after(text: str, raw_end: int) -> bool:
     if ENGLISH_NEGATION_BOUNDARY_PATTERN.search(before_negation) is not None:
         return False
     if ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN.search(before_negation) is not None:
+        return False
+    if ENGLISH_TRAILING_CAVEAT_PATTERN.search(before_negation) is not None:
         return False
     if _has_affirmative_storage_after_post_raw_negation(suffix, match.end()):
         return False
