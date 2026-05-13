@@ -424,7 +424,32 @@ class RubricodexContractTests(unittest.TestCase):
             (
                 "@Rubricodex keep storing raw command output in evidence.",
                 "raw_command_output",
-                "store",
+                "keep",
+            ),
+            (
+                "@Rubricodex add the raw transcript to evidence.json.",
+                "raw_transcript",
+                "add",
+            ),
+            (
+                "@Rubricodex include raw command output in the report.",
+                "raw_command_output",
+                "include",
+            ),
+            (
+                "@Rubricodex paste raw transcript into the repo.",
+                "raw_transcript",
+                "paste",
+            ),
+            (
+                "@Rubricodex put raw task log in .rubricodex.",
+                "raw_task_log",
+                "put",
+            ),
+            (
+                "@Rubricodex keep raw command output in evidence.",
+                "raw_command_output",
+                "keep",
             ),
         ]
 
@@ -472,6 +497,10 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_command_output",
             ),
             (
+                "@Rubricodex do not store raw transcript but store it in evidence.json.",
+                "raw_transcript",
+            ),
+            (
                 "@Rubricodex raw transcript는 저장하지 말고 raw command output은 저장해줘.",
                 "raw_command_output",
             ),
@@ -496,6 +525,9 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex don't redact anything, store the raw transcript in the repo.", "raw_transcript"),
             ("@Rubricodex store the raw transcript without storing summaries.", "raw_transcript"),
             ("@Rubricodex don't save anything else and store raw transcript.", "raw_transcript"),
+            ("@Rubricodex store raw transcript in repo but never persist summaries.", "raw_transcript"),
+            ("@Rubricodex raw transcript should be stored in repo and never persisted elsewhere.", "raw_transcript"),
+            ("@Rubricodex save raw command output to evidence but never store transcripts.", "raw_command_output"),
             ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
             ("@Rubricodex save a redacted summary plus raw command output.", "raw_command_output"),
             (
@@ -561,6 +593,21 @@ class RubricodexContractTests(unittest.TestCase):
                 "store",
             ),
             (
+                "@Rubricodex Here is the raw transcript. Write to .rubricodex/runs/foo/evidence.json.",
+                "raw_transcript",
+                "write",
+            ),
+            (
+                "@Rubricodex The raw command output is below. Write to evidence.json.",
+                "raw_command_output",
+                "write",
+            ),
+            (
+                "@Rubricodex raw transcript는 아래에 있어요. write to repo.",
+                "raw_transcript",
+                "write",
+            ),
+            (
                 "@Rubricodex Here is the raw transcript. It should be stored in the repo.",
                 "raw_transcript",
                 "store",
@@ -594,7 +641,10 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex raw transcript should not be stored in the repo.",
             "@Rubricodex do not ever store raw transcripts.",
             "@Rubricodex raw transcripts shouldn't be stored in repo.",
+            "@Rubricodex raw command output은 커밋 금지입니다.",
             "@Rubricodex write docs: raw transcripts should not ever be stored in repo.",
+            "@Rubricodex write docs: raw transcripts are not to be stored.",
+            "@Rubricodex raw transcript is stored nowhere; write summary only.",
             "@Rubricodex Store everything below in .rubricodex. Do not include raw transcripts.",
             "@Rubricodex store the summary of the raw transcript in evidence.json.",
             "@Rubricodex save a redacted summary of raw command output.",
