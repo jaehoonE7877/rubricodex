@@ -362,18 +362,27 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertNotIn("store the raw transcript", result["reason"])
 
     def test_hook_intake_blocks_explicit_korean_raw_storage_prompt(self) -> None:
-        result = evaluate_gate(
-            "intake-boundary",
-            {
-                "hook_event_name": "UserPromptSubmit",
-                "prompt": "@Rubricodex raw transcript를 repo에 저장해줘.",
-                "cwd": str(self.root),
-            },
-        )
+        cases = [
+            ("@Rubricodex raw transcript를 repo에 저장해줘.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript repo에 저장", "raw_transcript", "저장"),
+            ("@Rubricodex raw task log 기록", "raw_task_log", "기록"),
+            ("@Rubricodex raw command output 커밋", "raw_command_output", "커밋"),
+        ]
 
-        self.assertEqual(result["decision"], "block")
-        self.assertIn("matched_categories=raw_transcript", result["reason"])
-        self.assertIn("matched_action=저장", result["reason"])
+        for prompt, category, action in cases:
+            with self.subTest(prompt=prompt):
+                result = evaluate_gate(
+                    "intake-boundary",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result["decision"], "block")
+                self.assertIn(f"matched_categories={category}", result["reason"])
+                self.assertIn(f"matched_action={action}", result["reason"])
 
     def test_hook_intake_blocks_unredacted_command_output_without_raw_word(self) -> None:
         for prompt in (
@@ -565,6 +574,8 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write an AGENTS policy: raw transcripts must not be stored in repo.",
             "@Rubricodex write docs: raw transcripts are not allowed to be stored.",
             "@Rubricodex raw transcript should not be stored in the repo.",
+            "@Rubricodex store the summary of the raw transcript in evidence.json.",
+            "@Rubricodex save a redacted summary of raw command output.",
             "@Rubricodex summarize the raw transcript and store the summary in evidence.json.",
             "@Rubricodex summarize the raw transcript and store it in evidence.json.",
             "@Rubricodex redact raw command output and save the redacted summary in evidence.json.",

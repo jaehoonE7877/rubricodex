@@ -93,7 +93,9 @@ ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
-    r"(?P<action>" + "|".join(KOREAN_STORAGE_ACTIONS) + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요)",
+    r"(?P<action>"
+    + "|".join(KOREAN_STORAGE_ACTIONS)
+    + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁)?\s*(?:$|[.!?。])",
 )
 REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
 SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
@@ -197,21 +199,33 @@ def _is_negated_english_raw_reference_after(text: str, raw_end: int) -> bool:
     return ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix) is not None
 
 
+def _active_raw_category_matches(text: str) -> list[dict[str, Any]]:
+    return [
+        match
+        for match in _raw_category_matches(text)
+        if not _is_negated_raw_reference(text, int(match["start"]))
+        and not _is_negated_english_raw_reference_after(text, int(match["end"]))
+        and not _is_negated_korean_raw_reference(text, int(match["end"]))
+    ]
+
+
 def _active_raw_categories(text: str) -> list[str]:
-    return _unique_categories(
-        [
-            match
-            for match in _raw_category_matches(text)
-            if not _is_negated_raw_reference(text, int(match["start"]))
-            and not _is_negated_english_raw_reference_after(text, int(match["end"]))
-            and not _is_negated_korean_raw_reference(text, int(match["end"]))
-        ]
-    )
+    return _unique_categories(_active_raw_category_matches(text))
 
 
 def _is_negated_english_action(text: str, action_start: int) -> bool:
     prefix = text[max(0, action_start - 32) : action_start].lower()
     return NEGATED_ENGLISH_ACTION_PREFIX_PATTERN.search(prefix) is not None
+
+
+def _is_safe_summary_storage_suffix(suffix: str) -> bool:
+    summary_match = SAFE_SUMMARY_OBJECT_PATTERN.search(suffix)
+    if summary_match is None:
+        return False
+    raw_matches = _active_raw_category_matches(suffix)
+    if not raw_matches:
+        return True
+    return int(summary_match.start()) < min(int(match["start"]) for match in raw_matches)
 
 
 def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
@@ -220,13 +234,15 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
             continue
         suffix = clause[english_match.end() : english_match.end() + 120]
         prefix_categories = _active_raw_categories(clause[max(0, english_match.start() - 120) : english_match.start()])
-        if not _active_raw_categories(suffix) and (
+        suffix_categories = _active_raw_categories(suffix)
+        if (
             (
-                SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None
+                _is_safe_summary_storage_suffix(suffix)
                 and (not prefix_categories or SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None)
             )
             or (
-                SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None
+                not suffix_categories
+                and SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None
                 and REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
             )
         ):
