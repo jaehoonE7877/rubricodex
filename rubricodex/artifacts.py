@@ -894,6 +894,12 @@ def validate_evidence(data: dict[str, Any], matrix: dict[str, Any]) -> list[Vali
         issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {EVIDENCE_TYPE}"))
     if data.get("raw_output_stored") is not False:
         issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
+    runner_summary = data.get("runner_summary")
+    if runner_summary is not None:
+        if not isinstance(runner_summary, str):
+            issues.append(ValidationIssue("$.runner_summary", "runner_summary must be a string when present"))
+        else:
+            issues.extend(validate_raw_payload_markers(runner_summary, "$.runner_summary"))
 
     known_ids = {criterion["id"] for criterion in matrix.get("criteria", []) if isinstance(criterion, dict) and "id" in criterion}
     items = data.get("evidence_items")
@@ -934,7 +940,22 @@ def validate_scorecard(data: dict[str, Any]) -> list[ValidationIssue]:
         path = f"$.results[{index}]"
         if isinstance(result.get("reason"), str):
             issues.extend(validate_raw_payload_markers(result["reason"], f"{path}.reason"))
-        for summary_index, summary in enumerate(result.get("evidence_summaries", [])):
+        if "evidence_summaries" not in result:
+            continue
+        summaries = result["evidence_summaries"]
+        if not isinstance(summaries, list):
+            issues.append(ValidationIssue(f"{path}.evidence_summaries", "evidence_summaries must be a list when present"))
+            issues.extend(validate_raw_payload_markers(summaries, f"{path}.evidence_summaries"))
+            continue
+        for summary_index, summary in enumerate(summaries):
+            if not isinstance(summary, str):
+                issues.append(
+                    ValidationIssue(
+                        f"{path}.evidence_summaries[{summary_index}]",
+                        "evidence summary must be a string",
+                    )
+                )
+                continue
             issues.extend(validate_raw_payload_markers(summary, f"{path}.evidence_summaries[{summary_index}]"))
     return issues
 

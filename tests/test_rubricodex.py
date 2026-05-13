@@ -1303,9 +1303,43 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["evidence_items"][0]["summary"] = "raw transcript: user pasted the original chat."
         self.assertIn("$.evidence_items[0].summary", {issue.path for issue in validate_evidence(evidence, matrix)})
 
+        runner_evidence = sample_evidence(matrix)
+        runner_evidence["runner_summary"] = "stdout: raw command output"
+        self.assertIn("$.runner_summary", {issue.path for issue in validate_evidence(runner_evidence, matrix)})
+
         safe_evidence = sample_evidence(matrix)
         safe_evidence["evidence_items"][0]["summary"] = "Confirmed raw transcript/log/output storage is absent."
         self.assertEqual(validate_evidence(safe_evidence, matrix), [])
+
+        scorecard = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": SCORECARD_TYPE,
+            "rubricodex_version": "0.1.0",
+            "created_at": "2026-05-11T00:00:00Z",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "scoring_model": "counts-v0.1",
+            "decision": "pass",
+            "counts": {"pass": 1, "partial": 0, "missing_evidence": 0, "fail": 0},
+            "results": [
+                {
+                    "criterion_id": "C-01",
+                    "name": "Intent alignment",
+                    "hard_gate": True,
+                    "status": "pass",
+                    "evidence_summaries": ["raw command output: failing command details"],
+                    "reason": "Summarized evidence satisfies the criterion.",
+                    "retune_hint": "No retune needed.",
+                }
+            ],
+        }
+        self.assertIn("$.results[0].evidence_summaries[0]", {issue.path for issue in validate_scorecard(scorecard)})
+
+        scorecard["results"][0]["evidence_summaries"] = "raw transcript: original chat"
+        self.assertIn("$.results[0].evidence_summaries", {issue.path for issue in validate_scorecard(scorecard)})
+
+        scorecard["results"][0]["evidence_summaries"] = None
+        self.assertIn("$.results[0].evidence_summaries", {issue.path for issue in validate_scorecard(scorecard)})
 
         manifest = {
             "schema_version": SCHEMA_VERSION,
