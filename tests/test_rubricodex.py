@@ -470,6 +470,22 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result, {})
 
+    def test_hook_matrix_readiness_ignores_surrounding_implementation_context_with_read_only_command(self) -> None:
+        init_project(self.root)
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Before I implement this.\n@Rubricodex show status --run-id missing-lock",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
     def test_hook_matrix_readiness_blocks_clear_execute_handoff_with_taskpack_state(self) -> None:
         init_project(self.root)
         write_json(intent_path(self.root), sample_brief())
@@ -1286,7 +1302,7 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(validate_run_manifest(manifest))
 
     def test_run_manifest_rejects_raw_output_markers_in_summary_fields(self) -> None:
-        for marker in ("STDOUT: raw output", "## STDOUT: raw output"):
+        for marker in ("STDOUT: raw output", "## STDOUT: raw output", "RAW OUTPUT: raw", "UNREDACTED OUTPUT: raw"):
             with self.subTest(marker=marker):
                 manifest = {
                     "schema_version": SCHEMA_VERSION,

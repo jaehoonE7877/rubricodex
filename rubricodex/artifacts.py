@@ -159,7 +159,7 @@ FORBIDDEN_KEYS = {_normalize_artifact_key(key) for key in FORBIDDEN_KEY_LABELS}
 FORBIDDEN_RAW_VALUE_PATTERN = re.compile(
     r"(?im)^\s*(?:[-*+]\s+|#{1,6}\s*|>\s*)*(?:"
     r"raw transcript|raw chat transcript|raw task log|raw codex log|"
-    r"raw command output|unredacted command output|stdout|stderr"
+    r"raw command output|unredacted command output|raw output|unredacted output|stdout|stderr"
     r")\s*:",
 )
 

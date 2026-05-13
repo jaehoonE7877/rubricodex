@@ -117,6 +117,10 @@ def _is_validation_run_prompt(text: str) -> bool:
     return VALIDATION_RUN_PATTERN.search(text) is not None
 
 
+def _has_direct_rubricodex_line(text: str) -> bool:
+    return DIRECT_RUBRICODEX_LINE_PATTERN.search(text) is not None
+
+
 def _has_direct_rubricodex_handoff(text: str) -> bool:
     for match in DIRECT_RUBRICODEX_LINE_PATTERN.finditer(text):
         line = match.group(0)
@@ -130,7 +134,7 @@ def _has_direct_rubricodex_handoff(text: str) -> bool:
 def _is_explicit_handoff_prompt(text: str) -> bool:
     if _has_direct_rubricodex_handoff(text):
         return True
-    if DIRECT_RUBRICODEX_LINE_PATTERN.search(text):
+    if _has_direct_rubricodex_line(text):
         return False
     return _has_explicit_run_id(text) and _is_implementation_handoff(text)
 
@@ -233,6 +237,8 @@ def evaluate_matrix_readiness(payload: dict[str, Any]) -> dict[str, Any]:
         return {}
     explicit_handoff = _is_explicit_handoff_prompt(prompt)
     if _is_policy_document_prompt(prompt) and not explicit_handoff:
+        return {}
+    if _has_direct_rubricodex_line(prompt) and not explicit_handoff:
         return {}
     if not explicit_handoff and not _is_implementation_handoff(prompt):
         return {}
