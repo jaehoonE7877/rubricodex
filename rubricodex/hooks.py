@@ -83,6 +83,15 @@ ENGLISH_NEGATION_BOUNDARY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(r"^[^.!?;；,\n\r]{0,80}저장\s*(?:하지|하지\s+않|금지|허용하지)")
+ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
+    r"^[^.!?;；]{0,120}(?:(?:must|should)\s+not|do\s+not|don't|never|not)\s+(?:be\s+)?"
+    + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    + r"\b"
+    + r"|^[^.!?;；]{0,120}(?:is|are|be)\s+(?:not\s+allowed|forbidden|prohibited)\s+to\s+be\s+"
+    + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    + r"\b",
+    re.IGNORECASE,
+)
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>" + "|".join(KOREAN_STORAGE_ACTIONS) + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요)",
 )
@@ -177,12 +186,18 @@ def _is_negated_korean_raw_reference(text: str, raw_end: int) -> bool:
     return KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix) is not None
 
 
+def _is_negated_english_raw_reference_after(text: str, raw_end: int) -> bool:
+    suffix = text[raw_end : raw_end + 160]
+    return ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix) is not None
+
+
 def _active_raw_categories(text: str) -> list[str]:
     return _unique_categories(
         [
             match
             for match in _raw_category_matches(text)
             if not _is_negated_raw_reference(text, int(match["start"]))
+            and not _is_negated_english_raw_reference_after(text, int(match["end"]))
             and not _is_negated_korean_raw_reference(text, int(match["end"]))
         ]
     )
@@ -198,8 +213,12 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         if _is_negated_english_action(clause, english_match.start()):
             continue
         suffix = clause[english_match.end() : english_match.end() + 120]
+        prefix_categories = _active_raw_categories(clause[max(0, english_match.start() - 120) : english_match.start()])
         if not _active_raw_categories(suffix) and (
-            SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None
+            (
+                SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None
+                and (not prefix_categories or SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None)
+            )
             or (
                 SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None
                 and REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None

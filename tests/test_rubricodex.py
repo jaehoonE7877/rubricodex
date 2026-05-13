@@ -406,6 +406,11 @@ class RubricodexContractTests(unittest.TestCase):
                 "store",
             ),
             (
+                "@Rubricodex raw transcript should be saved alongside a summary.",
+                "raw_transcript",
+                "save",
+            ),
+            (
                 "@Rubricodex keep storing raw command output in evidence.",
                 "raw_command_output",
                 "store",
@@ -547,6 +552,8 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex store summarized evidence, not raw transcripts.",
             "@Rubricodex write docs that say do not store raw transcripts.",
             "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",
+            "@Rubricodex write an AGENTS policy: raw transcripts must not be stored in repo.",
+            "@Rubricodex write docs: raw transcripts are not allowed to be stored.",
             "@Rubricodex raw transcript should not be stored in the repo.",
             "@Rubricodex summarize the raw transcript and store the summary in evidence.json.",
             "@Rubricodex summarize the raw transcript and store it in evidence.json.",
