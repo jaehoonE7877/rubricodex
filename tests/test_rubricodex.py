@@ -518,6 +518,10 @@ class RubricodexContractTests(unittest.TestCase):
                 "@Rubricodex raw transcript는 저장하지 말고 raw command output은 저장해줘.",
                 "raw_command_output",
             ),
+            (
+                "@Rubricodex raw transcript 저장하지 말고 커밋해줘.",
+                "raw_transcript",
+            ),
         ]
 
         for prompt, category in cases:
@@ -647,6 +651,11 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
                 "store",
             ),
+            (
+                "@Rubricodex Here is the raw transcript. Add it to the do-not-store policy and to evidence.json.",
+                "raw_transcript",
+                "add",
+            ),
         ]
 
         for prompt, category, action in cases:
@@ -722,6 +731,7 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex Here is the raw transcript. Extract requirements and save them to evidence.json.",
             "@Rubricodex Here is the raw transcript. Extract requirements from it and save to evidence.json.",
             "@Rubricodex Here is raw command output. Analyze it and write to summary.md.",
+            "@Rubricodex analyze raw command output and write to summary.md.",
             "@Rubricodex Here is raw command output. Analyze it and write a summary.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 하지 말고 요약만 해줘.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 금지이고 요약만 해줘.",

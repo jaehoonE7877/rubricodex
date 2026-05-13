@@ -182,6 +182,11 @@ POLICY_PROHIBITION_CONTEXT_PATTERN = re.compile(
     r"should\s+not|never|no)\b|금지|허용하지|저장하지",
     re.IGNORECASE,
 )
+POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN = re.compile(
+    r"\b(?:and|also|then)\b[^.!?;；]{0,80}"
+    r"(?:\bevidence(?:\.json)?\b|\breport(?:\.md)?\b|\brepo(?:sitory)?\b|\.rubricodex|\.json|\.md)",
+    re.IGNORECASE,
+)
 DERIVED_TRANSFORM_VERB_PATTERN = re.compile(
     r"\b(?:extract|derive|summari[sz]e|redact|saniti[sz]e|analy[sz]e|review)\b|요약",
     re.IGNORECASE,
@@ -328,6 +333,20 @@ def _is_negated_korean_raw_reference(text: str, raw_end: int) -> bool:
     match = KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix)
     if match is None:
         return False
+    after_negation = suffix[match.end() : match.end() + 120]
+    boundary_match = re.search(r"(?:말고|대신|하지만|그러나|그리고|,)", after_negation)
+    if boundary_match is not None:
+        after_boundary = after_negation[boundary_match.end() :]
+        for storage_match in KOREAN_RAW_STORAGE_REQUEST_PATTERN.finditer(after_boundary):
+            action_start = storage_match.start("action")
+            if _is_negated_korean_action(after_boundary, action_start) or _is_safe_korean_summary_action(
+                after_boundary,
+                action_start,
+            ):
+                continue
+            if not _raw_category_matches(after_boundary[:action_start]):
+                return False
+            break
     return not _has_affirmative_korean_storage_action(suffix[: match.start()])
 
 
@@ -428,7 +447,7 @@ def _has_safe_analysis_reference_before(text: str) -> bool:
         if NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN.search(prefix) is not None:
             continue
         following = text[transform_match.end() :]
-        if REFERENCE_RAW_OBJECT_PATTERN.search(following) is not None:
+        if REFERENCE_RAW_OBJECT_PATTERN.search(following) is not None or _raw_category_matches(following):
             return True
     return False
 
@@ -438,6 +457,7 @@ def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
         action in {"include", "add"}
         and POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
         and POLICY_PROHIBITION_CONTEXT_PATTERN.search(suffix) is not None
+        and POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN.search(suffix) is None
     )
 
 
