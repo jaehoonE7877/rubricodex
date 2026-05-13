@@ -1302,7 +1302,14 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue(validate_run_manifest(manifest))
 
     def test_run_manifest_rejects_raw_output_markers_in_summary_fields(self) -> None:
-        for marker in ("STDOUT: raw output", "## STDOUT: raw output", "RAW OUTPUT: raw", "UNREDACTED OUTPUT: raw"):
+        for marker in (
+            "STDOUT: raw output",
+            "## STDOUT: raw output",
+            "RAW OUTPUT: raw",
+            "UNREDACTED OUTPUT: raw",
+            "RAW LOG: raw",
+            "RAW LOGS: raw",
+        ):
             with self.subTest(marker=marker):
                 manifest = {
                     "schema_version": SCHEMA_VERSION,
@@ -1875,7 +1882,7 @@ class RubricodexContractTests(unittest.TestCase):
             "results": [],
         }
 
-        for key in ("stdout", "stderr", "Raw Transcript", "raw-output"):
+        for key in ("stdout", "stderr", "Raw Transcript", "Raw Log", "raw-output"):
             with self.subTest(key=key):
                 scorecard = dict(base)
                 scorecard[key] = "do not store this"
