@@ -650,8 +650,14 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex save a redacted summary of raw command output.",
             "@Rubricodex summarize the raw transcript and store the summary in evidence.json.",
             "@Rubricodex summarize the raw transcript and store it in evidence.json.",
+            "@Rubricodex summarize the raw transcript and store it in evidence.json and add tests.",
             "@Rubricodex redact raw command output and save the redacted summary in evidence.json.",
             "@Rubricodex Here is the raw transcript. Extract requirements. Save the goal lock.",
+            "@Rubricodex Here is the raw transcript. Review it and write a summary.",
+            "@Rubricodex Here is the raw transcript. Extract requirements from it and add tests.",
+            "@Rubricodex Here is raw command output. Analyze it and write a summary.",
+            "@Rubricodex raw transcript는 아래에 있어요. 저장 하지 말고 요약만 해줘.",
+            "@Rubricodex raw transcript는 아래에 있어요. 저장 금지이고 요약만 해줘.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
 
