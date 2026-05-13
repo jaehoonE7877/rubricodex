@@ -61,17 +61,23 @@ READY_COMPLETION_PATTERN = re.compile(
 )
 PROMPT_CLAUSE_PATTERN = re.compile(r"[\n\r]+|(?<=[.!?])\s+|[;；]")
 ENGLISH_STORAGE_ACTION_PATTERN = re.compile(r"\b(" + ENGLISH_STORAGE_ACTION_PATTERN_TEXT + r")\b", re.IGNORECASE)
+ENGLISH_RAW_REFERENCE_ACTION_PATTERN_TEXT = (
+    r"(?:"
+    + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    + r"|includes?|included|including|adds?|added|adding|pastes?|pasted|pasting|puts?|putting|keeps?|kept|keeping)"
+)
 NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
-    r"(?:do\s+not|don't|must\s+not(?:\s+be)?|should\s+not(?:\s+be)?|never(?:\s+be)?|not(?:\s+be)?|"
-    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|without)\s+$",
+    r"(?:please\s+)?(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|never|not|"
+    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|without)(?:\s+ever)?(?:\s+be)?\s+$",
     re.IGNORECASE,
 )
 NEGATED_STORAGE_BEFORE_RAW_PATTERN = re.compile(
-    r"(?:do\s+not|don't|must\s+not|should\s+not|never|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+"
-    + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    r"(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|never|not\s+allowed\s+to|"
+    r"forbidden\s+to|prohibited\s+to)(?:\s+ever)?\s+"
+    + ENGLISH_RAW_REFERENCE_ACTION_PATTERN_TEXT
     + r"\b(?P<body>[^.!?;；]{0,120})$"
     + r"|without\s+"
-    + ENGLISH_STORAGE_GERUND_PATTERN_TEXT
+    + r"(?:" + ENGLISH_STORAGE_GERUND_PATTERN_TEXT + r"|including|adding|pasting|putting|keeping)"
     + r"\b(?P<without_body>[^.!?;；]{0,120})$",
     re.IGNORECASE,
 )
@@ -84,11 +90,14 @@ ENGLISH_NEGATION_BOUNDARY_PATTERN = re.compile(
 )
 KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(r"^[^.!?;；,\n\r]{0,80}저장\s*(?:하지|하지\s+않|금지|허용하지)")
 ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
-    r"^[^.!?;；]{0,120}(?:(?:must|should)\s+not|do\s+not|don't|never|not)\s+(?:be\s+)?"
+    r"^[^.!?;；]{0,120}(?:(?:must|should)\s+not|mustn't|shouldn't|do\s+not|don't|never|not)"
+    r"(?:\s+ever)?\s+(?:be\s+)?"
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
     + r"\b"
     + r"|^[^.!?;；]{0,120}(?:is|are|be)\s+(?:not\s+allowed|forbidden|prohibited)\s+to\s+be\s+"
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    + r"\b"
+    + r"|^[^.!?;；]{0,120}(?:is|are|be)\s+(?:not\s+allowed|forbidden|prohibited)"
     + r"\b",
     re.IGNORECASE,
 )
