@@ -103,6 +103,11 @@ SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SUMMARY_TRANSFORM_PATTERN = re.compile(r"\b(?:summari[sz]e|redact|saniti[sz]e)\b|요약", re.IGNORECASE)
+SUMMARY_SOURCE_CONNECTOR_PATTERN = re.compile(r"\b(?:of|from|about)\b", re.IGNORECASE)
+RAW_INCLUSION_CONNECTOR_PATTERN = re.compile(
+    r"\b(?:and|plus|with|alongside|including|containing)\b",
+    re.IGNORECASE,
+)
 SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
     r"^\s+(?:the\s+|a\s+|an\s+|this\s+|that\s+|our\s+|my\s+)?"
     r"(?:goal\s+lock|intent\s+brief|brief|summary|summaries|summarized\s+evidence|redacted\s+summary|"
@@ -225,7 +230,14 @@ def _is_safe_summary_storage_suffix(suffix: str) -> bool:
     raw_matches = _active_raw_category_matches(suffix)
     if not raw_matches:
         return True
-    return int(summary_match.start()) < min(int(match["start"]) for match in raw_matches)
+    first_raw_start = min(int(match["start"]) for match in raw_matches)
+    if int(summary_match.start()) >= first_raw_start:
+        return False
+    connector = suffix[summary_match.end() : first_raw_start]
+    return (
+        SUMMARY_SOURCE_CONNECTOR_PATTERN.search(connector) is not None
+        and RAW_INCLUSION_CONNECTOR_PATTERN.search(connector) is None
+    )
 
 
 def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
@@ -264,14 +276,14 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
         if _is_negated_english_action(clause, english_match.start()):
             continue
         suffix = clause[english_match.end() : english_match.end() + 120]
-        if (
-            SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None
-            or SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None
-        ):
-            continue
         action = _canonical_english_storage_action(english_match.group(1))
         reference_window = clause[max(0, english_match.start() - 80) : english_match.end() + 120]
-        if action != "write" or REFERENCE_RAW_OBJECT_PATTERN.search(reference_window) is not None:
+        has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(reference_window) is not None
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
+            continue
+        if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference:
+            continue
+        if action != "write" or has_raw_reference:
             return {
                 "matched_categories": ",".join(previous_categories),
                 "matched_action": action,

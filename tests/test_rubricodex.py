@@ -446,6 +446,8 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write docs with the raw transcript.",
             "@Rubricodex write documentation containing raw command output.",
             "@Rubricodex write an AGENTS policy with the raw transcript.",
+            "@Rubricodex Here is the raw transcript. Write docs with it.",
+            "@Rubricodex Here is raw command output. Save documentation with it.",
         ):
             with self.subTest(prompt=prompt):
                 result = evaluate_gate(
@@ -487,11 +489,15 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertIn(f"matched_categories={category}", result["reason"])
 
     def test_hook_intake_blocks_storage_request_with_unrelated_negation(self) -> None:
-        for prompt in (
-            "@Rubricodex don't redact anything, store the raw transcript in the repo.",
-            "@Rubricodex store the raw transcript without storing summaries.",
-            "@Rubricodex don't save anything else and store raw transcript.",
-        ):
+        cases = [
+            ("@Rubricodex don't redact anything, store the raw transcript in the repo.", "raw_transcript"),
+            ("@Rubricodex store the raw transcript without storing summaries.", "raw_transcript"),
+            ("@Rubricodex don't save anything else and store raw transcript.", "raw_transcript"),
+            ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
+            ("@Rubricodex save a redacted summary plus raw command output.", "raw_command_output"),
+        ]
+
+        for prompt, category in cases:
             with self.subTest(prompt=prompt):
                 result = evaluate_gate(
                     "intake-boundary",
@@ -503,7 +509,7 @@ class RubricodexContractTests(unittest.TestCase):
                 )
 
                 self.assertEqual(result["decision"], "block")
-                self.assertIn("matched_categories=raw_transcript", result["reason"])
+                self.assertIn(f"matched_categories={category}", result["reason"])
 
     def test_hook_intake_blocks_cross_sentence_raw_storage_request(self) -> None:
         cases = [
