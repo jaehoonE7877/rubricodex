@@ -23,10 +23,10 @@ The bundled hook config is safe for plugin-only installs:
 1. `rubricodex_intake_boundary_gate`
    - Event: `UserPromptSubmit`
    - CLI gate: `rubricodex hook gate intake-boundary`
-   - Blocks explicit requests that ask Rubricodex to store raw transcripts, task logs, or unredacted command output.
-   - Allows policy, docs, AGENTS, and negative wording such as `do not store raw transcripts`.
-   - Block reasons include the gate name, matched raw artifact categories, and matched action without echoing prompt text.
-   - Adds intake guidance for Rubricodex prompts.
+   - Does not hard block prompts. It always keeps the Rubricodex first-run path open.
+   - Adds advisory `additionalContext` for Rubricodex prompts.
+   - When raw transcript, task log, or unredacted command output storage risk is detected, guidance includes the gate name, matched raw artifact categories, and matched action without echoing prompt text.
+   - Raw storage enforcement lives in artifact schemas, validators, and report writer paths instead of the `UserPromptSubmit` hook.
 
 2. `rubricodex_matrix_readiness_gate`
    - Event: `UserPromptSubmit`
@@ -49,7 +49,7 @@ Hooks require Codex hook support to be enabled by the user or environment:
 codex_hooks = true
 ```
 
-For full gate enforcement in a repo, install the CLI locally:
+For advisory guidance plus matrix/completion gates in a repo, install the CLI locally:
 
 ```bash
 python3 -m pip install -e .

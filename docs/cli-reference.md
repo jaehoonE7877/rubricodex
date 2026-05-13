@@ -70,7 +70,7 @@ Schemas는 자동화와 문서화를 위한 lightweight surface입니다. 실제
 ## Lifecycle hooks
 
 Plugin-bundled lifecycle hooks는 CLI가 설치되어 있을 때만 phase gate를 실행합니다.
-Block reason은 gate 이름과 원인 분류를 포함합니다. `intake-boundary`는 명시적인 raw artifact 저장 요청만 차단하고, 정책 문서나 `do not store raw transcripts` 같은 부정 문맥은 허용합니다.
+`intake-boundary`는 `UserPromptSubmit`에서 hard block하지 않고 advisory `additionalContext`를 제공합니다. raw transcript/log/command output 저장 위험이 보이면 prompt 원문 없이 gate 이름과 원인 분류를 guidance에 포함합니다. 실제 raw 저장 방지는 artifact schema와 Python validators가 맡습니다.
 
 ```bash
 rubricodex hook gate intake-boundary
