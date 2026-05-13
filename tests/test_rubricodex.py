@@ -483,6 +483,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write docs with the raw transcript.",
             "@Rubricodex write documentation containing raw command output.",
             "@Rubricodex write an AGENTS policy with the raw transcript.",
+            "@Rubricodex Write raw transcript to evidence.json and to the do-not-store policy.",
+            "@Rubricodex Add raw transcript to evidence.json and to the do-not-store policy.",
+            "@Rubricodex Include raw command output in evidence.json and in the do-not-store policy.",
             "@Rubricodex Here is the raw transcript. Write docs with it.",
             "@Rubricodex Here is raw command output. Save documentation with it.",
             "@Rubricodex Here is the raw transcript. Save the summary and it to evidence.json.",
@@ -554,6 +557,8 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex summarize the raw transcript and store it unredacted.", "raw_transcript"),
             ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
             ("@Rubricodex save a redacted summary plus raw command output.", "raw_command_output"),
+            ("@Rubricodex raw transcript 요약 말고 저장해줘.", "raw_transcript"),
+            ("@Rubricodex raw transcript 요약 없이 저장해줘.", "raw_transcript"),
             (
                 "@Rubricodex store a summary of raw transcript alongside raw command output.",
                 "raw_transcript,raw_command_output",
@@ -638,6 +643,21 @@ class RubricodexContractTests(unittest.TestCase):
             ),
             (
                 "@Rubricodex Here is the raw transcript. Please review it carefully. Store it in the repo.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex Here is the raw transcript. Do not make a summary. Store it in repo.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex Here is the raw transcript. No summary. Store it in repo.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex Here is the raw transcript. Summary is not needed. Store it in repo.",
                 "raw_transcript",
                 "store",
             ),

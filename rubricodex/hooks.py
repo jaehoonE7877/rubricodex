@@ -142,6 +142,19 @@ SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
     r"\b(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
     re.IGNORECASE,
 )
+AFFIRMATIVE_SUMMARY_OUTPUT_PATTERN = re.compile(
+    r"\b(?:make|create|write|produce|include|add|store|save|record|persist)\b"
+    r"[^.!?;；]{0,80}\b(?:a\s+|an\s+|the\s+)?"
+    r"(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
+    re.IGNORECASE,
+)
+NEGATED_SUMMARY_OUTPUT_PATTERN = re.compile(
+    r"\b(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|never)\b"
+    r"[^.!?;；]{0,80}\b(?:summary|summaries)\b"
+    r"|\b(?:no|without)\s+(?:a\s+|the\s+)?(?:summary|summaries)\b"
+    r"|\b(?:summary|summaries)\b[^.!?;；]{0,40}\bnot\s+(?:needed|required|necessary)\b",
+    re.IGNORECASE,
+)
 SUMMARY_TRANSFORM_PATTERN = re.compile(r"\b(?:summari[sz]e|redact|saniti[sz]e)\b|요약", re.IGNORECASE)
 SUMMARY_TRANSFORM_VERB_PATTERN = re.compile(r"\b(?:summari[sz]e|redact|saniti[sz]e)\b", re.IGNORECASE)
 NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN = re.compile(
@@ -185,6 +198,10 @@ POLICY_PROHIBITION_CONTEXT_PATTERN = re.compile(
 POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN = re.compile(
     r"\b(?:and|also|then)\b[^.!?;；]{0,80}"
     r"(?:\bevidence(?:\.json)?\b|\breport(?:\.md)?\b|\brepo(?:sitory)?\b|\.rubricodex|\.json|\.md)",
+    re.IGNORECASE,
+)
+UNSAFE_ARTIFACT_DESTINATION_PATTERN = re.compile(
+    r"\bevidence(?:\.json)?\b|\breport(?:\.md)?\b|\brepo(?:sitory)?\b|\.rubricodex|\.json|\.md",
     re.IGNORECASE,
 )
 DERIVED_TRANSFORM_VERB_PATTERN = re.compile(
@@ -364,7 +381,7 @@ def _is_safe_korean_summary_action(text: str, action_start: int) -> bool:
     if summary_index < 0:
         return False
     summary_context = window[summary_index:]
-    if re.search(r"요약\s*하지|요약하지", summary_context) is not None:
+    if re.search(r"요약\s*(?:하지|말고|없이)|요약하지", summary_context) is not None:
         return False
     return not _raw_category_matches(summary_context)
 
@@ -456,6 +473,15 @@ def _has_safe_analysis_reference_before(text: str) -> bool:
 
 
 def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
+    first_policy_markers: list[int] = []
+    for pattern in (POLICY_DOC_DESTINATION_PATTERN, POLICY_PROHIBITION_CONTEXT_PATTERN):
+        match = pattern.search(suffix)
+        if match is not None:
+            first_policy_markers.append(match.start())
+    if first_policy_markers:
+        policy_start = min(first_policy_markers)
+        if UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix[:policy_start]) is not None:
+            return False
     return (
         action in {"include", "add", "write"}
         and POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
@@ -668,8 +694,10 @@ def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] 
 
 
 def _is_safe_output_clause(clause: str) -> bool:
+    if NEGATED_SUMMARY_OUTPUT_PATTERN.search(clause) is not None:
+        return False
     return (
-        SAFE_SUMMARY_OBJECT_PATTERN.search(clause) is not None
+        AFFIRMATIVE_SUMMARY_OUTPUT_PATTERN.search(clause) is not None
         or _has_safe_summary_transform_before(clause)
         or _has_safe_derived_output_before(clause)
     )
