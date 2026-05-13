@@ -114,7 +114,7 @@ ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     + r"|(?:is|are|was|were|be)\s+prohibited\s+from\s+being\s+"
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
     + r"\b"
-    + r"|(?:is|are|was|were|be)\s+(?:not\s+allowed|forbidden|prohibited)"
+    + r"|(?:is|are|was|were|be)\s+(?:not\s+allowed|forbidden|prohibited|disallowed)"
     + r"\b"
     + r"|(?:is|are|was|were|be)\s+"
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
@@ -128,7 +128,7 @@ ENGLISH_ACTION_NOWHERE_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")\s*(?P<form>해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
+    + r")\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
     r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
     r"\s*(?:$|[.!?。]|\s)",
 )
