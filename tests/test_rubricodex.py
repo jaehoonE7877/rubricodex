@@ -356,7 +356,44 @@ class RubricodexContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result["decision"], "block")
-        self.assertIn("raw", result["reason"])
+        self.assertIn("intake-boundary blocked", result["reason"])
+        self.assertIn("matched_categories=raw_transcript,raw_command_output", result["reason"])
+        self.assertIn("matched_action=store", result["reason"])
+        self.assertNotIn("store the raw transcript", result["reason"])
+
+    def test_hook_intake_blocks_explicit_korean_raw_storage_prompt(self) -> None:
+        result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex raw transcript를 repo에 저장해줘.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("matched_categories=raw_transcript", result["reason"])
+        self.assertIn("matched_action=저장", result["reason"])
+
+    def test_hook_intake_allows_policy_and_agents_prompts(self) -> None:
+        cases = [
+            "@Rubricodex follow this policy: raw transcript는 repo에 저장하지 않습니다.",
+            "@Rubricodex do not store raw transcripts or raw command output.",
+            (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
+        ]
+
+        for prompt in cases:
+            with self.subTest(prompt=prompt[:80]):
+                result = evaluate_gate(
+                    "intake-boundary",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertNotEqual(result.get("decision"), "block")
 
     def test_hook_matrix_readiness_blocks_implementation_without_lock(self) -> None:
         init_project(self.root)
