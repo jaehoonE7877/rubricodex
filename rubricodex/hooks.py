@@ -224,7 +224,7 @@ POLICY_PROHIBITION_CONTEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN = re.compile(
-    r"\b(?:and|also|then)\b[^.!?;；]{0,80}"
+    r"(?:\b(?:and|also|then|plus|along\s+with|as\s+well\s+as)\b|[&/])[^.!?;；]{0,80}"
     r"(?:\bevidence(?:\.json)?\b|\breport(?:\.md)?\b|\brepo(?:sitory)?\b|\.rubricodex|\.json|\.md)",
     re.IGNORECASE,
 )
@@ -667,7 +667,7 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
             suffix,
         )
         safe_summary_action = _is_safe_summary_storage_suffix(suffix) and (
-            not prefix_categories or _has_safe_summary_transform_before(clause[: english_match.start()])
+            not prefix_categories or action == "write" or _has_safe_summary_transform_before(prefix)
         )
         safe_summary_reference_action = (
             not suffix_categories
