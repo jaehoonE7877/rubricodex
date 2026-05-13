@@ -476,6 +476,7 @@ class RubricodexContractTests(unittest.TestCase):
         for prompt in (
             "@Rubricodex don't redact anything, store the raw transcript in the repo.",
             "@Rubricodex store the raw transcript without storing summaries.",
+            "@Rubricodex don't save anything else and store raw transcript.",
         ):
             with self.subTest(prompt=prompt):
                 result = evaluate_gate(
@@ -548,7 +549,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",
             "@Rubricodex raw transcript should not be stored in the repo.",
             "@Rubricodex summarize the raw transcript and store the summary in evidence.json.",
+            "@Rubricodex summarize the raw transcript and store it in evidence.json.",
             "@Rubricodex redact raw command output and save the redacted summary in evidence.json.",
+            "@Rubricodex Here is the raw transcript. Extract requirements. Save the goal lock.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
 

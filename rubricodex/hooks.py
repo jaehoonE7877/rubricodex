@@ -63,7 +63,7 @@ PROMPT_CLAUSE_PATTERN = re.compile(r"[\n\r]+|(?<=[.!?])\s+|[;；]")
 ENGLISH_STORAGE_ACTION_PATTERN = re.compile(r"\b(" + ENGLISH_STORAGE_ACTION_PATTERN_TEXT + r")\b", re.IGNORECASE)
 NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
     r"(?:do\s+not|don't|must\s+not(?:\s+be)?|should\s+not(?:\s+be)?|never(?:\s+be)?|not(?:\s+be)?|"
-    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
+    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|without)\s+$",
     re.IGNORECASE,
 )
 NEGATED_STORAGE_BEFORE_RAW_PATTERN = re.compile(
@@ -77,7 +77,7 @@ NEGATED_STORAGE_BEFORE_RAW_PATTERN = re.compile(
 )
 BARE_NEGATED_RAW_PREFIX_PATTERN = re.compile(r"(?:not|no)\s+$", re.IGNORECASE)
 ENGLISH_NEGATION_BOUNDARY_PATTERN = re.compile(
-    r"\b(?:but|however|except|instead)\b|,\s*(?:please\s+|then\s+)?"
+    r"\b(?:but|however|except|instead)\b|(?:,|\band\b|\bthen\b)\s*(?:please\s+|then\s+)?"
     + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
     + r"\b",
     re.IGNORECASE,
@@ -89,6 +89,13 @@ KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
 REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
 SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
     r"\b(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
+    re.IGNORECASE,
+)
+SUMMARY_TRANSFORM_PATTERN = re.compile(r"\b(?:summari[sz]e|redact|saniti[sz]e)\b|요약", re.IGNORECASE)
+SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
+    r"^\s+(?:the\s+|a\s+|an\s+|this\s+|that\s+|our\s+|my\s+)?"
+    r"(?:goal\s+lock|intent\s+brief|brief|summary|summaries|summarized\s+evidence|redacted\s+summary|"
+    r"evidence(?:\.json)?|report|scorecard|matrix|taskpack|requirements|policy|docs?|documentation)\b",
     re.IGNORECASE,
 )
 
@@ -191,7 +198,13 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         if _is_negated_english_action(clause, english_match.start()):
             continue
         suffix = clause[english_match.end() : english_match.end() + 120]
-        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not _active_raw_categories(suffix):
+        if not _active_raw_categories(suffix) and (
+            SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None
+            or (
+                SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None
+                and REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+            )
+        ):
             continue
         window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
         window_categories = _active_raw_categories(window)
@@ -210,7 +223,10 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
         if _is_negated_english_action(clause, english_match.start()):
             continue
         suffix = clause[english_match.end() : english_match.end() + 120]
-        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
+        if (
+            SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None
+            or SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None
+        ):
             continue
         action = _canonical_english_storage_action(english_match.group(1))
         reference_window = clause[max(0, english_match.start() - 80) : english_match.end() + 120]
