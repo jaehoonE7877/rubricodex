@@ -375,6 +375,42 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("matched_categories=raw_transcript", result["reason"])
         self.assertIn("matched_action=저장", result["reason"])
 
+    def test_hook_intake_blocks_unredacted_command_output_without_raw_word(self) -> None:
+        for prompt in (
+            "@Rubricodex store unredacted command output in the repo.",
+            "@Rubricodex write unredacted command output to .rubricodex/runs/foo/evidence.json.",
+        ):
+            with self.subTest(prompt=prompt):
+                result = evaluate_gate(
+                    "intake-boundary",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("matched_categories=raw_command_output", result["reason"])
+
+    def test_hook_intake_blocks_storage_request_with_unrelated_negation(self) -> None:
+        for prompt in (
+            "@Rubricodex don't redact anything, store the raw transcript in the repo.",
+            "@Rubricodex store the raw transcript without storing summaries.",
+        ):
+            with self.subTest(prompt=prompt):
+                result = evaluate_gate(
+                    "intake-boundary",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("matched_categories=raw_transcript", result["reason"])
+
     def test_hook_intake_allows_policy_and_agents_prompts(self) -> None:
         cases = [
             "@Rubricodex follow this policy: raw transcript는 repo에 저장하지 않습니다.",

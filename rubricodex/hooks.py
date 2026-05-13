@@ -31,24 +31,6 @@ RAW_STORAGE_CATEGORIES = {
 }
 ENGLISH_STORAGE_ACTIONS = ("store", "save", "commit", "write", "persist", "record")
 KOREAN_STORAGE_ACTIONS = ("저장", "커밋", "기록")
-NEGATED_OR_POLICY_CONTEXT_TERMS = (
-    "do not",
-    "don't",
-    "must not",
-    "never",
-    "not allowed",
-    "forbidden",
-    "prohibited",
-    "without storing",
-    "저장하지",
-    "저장 금지",
-    "금지",
-    "허용하지",
-    "남기지",
-    "정책",
-    "규칙",
-    "ask first",
-)
 IMPLEMENT_TERMS = ("implement", "handoff", "start coding", "start implementation", "begin implementation", "구현")
 ENGLISH_COMPLETION_TERMS = ("complete", "completed")
 KOREAN_COMPLETION_TERMS = ("완료", "준비", "통과")
@@ -74,11 +56,9 @@ READY_COMPLETION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PROMPT_CLAUSE_PATTERN = re.compile(r"[\n\r]+|(?<=[.!?])\s+|[;；]")
-ENGLISH_RAW_STORAGE_REQUEST_PATTERN = re.compile(
-    r"\b(?P<action>" + "|".join(ENGLISH_STORAGE_ACTIONS) + r")\b[^\n.!?;；]{0,120}\braw\b"
-    r"|\braw\b[^\n.!?;；]{0,120}\b(?P<action_after>"
-    + "|".join(ENGLISH_STORAGE_ACTIONS)
-    + r")\b",
+ENGLISH_STORAGE_ACTION_PATTERN = re.compile(r"\b(" + "|".join(ENGLISH_STORAGE_ACTIONS) + r")\b", re.IGNORECASE)
+NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
+    r"(?:do\s+not|don't|must\s+not|should\s+not|never|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
     re.IGNORECASE,
 )
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
@@ -115,27 +95,30 @@ def _matched_raw_categories(text: str) -> list[str]:
     ]
 
 
-def _is_negated_or_policy_context(text: str) -> bool:
-    lowered = text.lower()
-    return any(term in lowered for term in NEGATED_OR_POLICY_CONTEXT_TERMS)
+def _is_negated_english_action(text: str, action_start: int) -> bool:
+    prefix = text[max(0, action_start - 32) : action_start].lower()
+    return NEGATED_ENGLISH_ACTION_PREFIX_PATTERN.search(prefix) is not None
 
 
 def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
     for clause in PROMPT_CLAUSE_PATTERN.split(prompt):
         clause = clause.strip()
-        if not clause or _is_negated_or_policy_context(clause):
+        if not clause:
             continue
         categories = _matched_raw_categories(clause)
         if not categories:
             continue
 
-        english_match = ENGLISH_RAW_STORAGE_REQUEST_PATTERN.search(clause)
-        if english_match is not None:
-            action = english_match.group("action") or english_match.group("action_after")
-            return {
-                "matched_categories": ",".join(categories),
-                "matched_action": str(action).lower(),
-            }
+        for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
+            if _is_negated_english_action(clause, english_match.start()):
+                continue
+            window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
+            window_categories = _matched_raw_categories(window)
+            if window_categories:
+                return {
+                    "matched_categories": ",".join(window_categories),
+                    "matched_action": english_match.group(1).lower(),
+                }
 
         korean_match = KOREAN_RAW_STORAGE_REQUEST_PATTERN.search(clause)
         if korean_match is not None:
