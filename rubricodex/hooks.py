@@ -29,7 +29,11 @@ RAW_STORAGE_CATEGORIES = {
     "raw_task_log": ("raw task log", "raw codex log"),
     "raw_command_output": ("raw command output", "unredacted command output"),
 }
-ENGLISH_STORAGE_ACTIONS = ("store", "save", "commit", "write", "persist", "record")
+ENGLISH_STORAGE_ACTION_PATTERN_TEXT = (
+    r"(?:stores?|stored|storing|saves?|saved|saving|commits?|committed|committing|"
+    r"writes?|wrote|written|writing|persists?|persisted|persisting|records?|recorded|recording)"
+)
+ENGLISH_STORAGE_GERUND_PATTERN_TEXT = r"(?:storing|saving|committing|writing|persisting|recording)"
 KOREAN_STORAGE_ACTIONS = ("저장", "커밋", "기록")
 IMPLEMENT_TERMS = ("implement", "handoff", "start coding", "start implementation", "begin implementation", "구현")
 ENGLISH_COMPLETION_TERMS = ("complete", "completed")
@@ -56,29 +60,34 @@ READY_COMPLETION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PROMPT_CLAUSE_PATTERN = re.compile(r"[\n\r]+|(?<=[.!?])\s+|[;；]")
-ENGLISH_STORAGE_ACTION_PATTERN = re.compile(r"\b(" + "|".join(ENGLISH_STORAGE_ACTIONS) + r")\b", re.IGNORECASE)
+ENGLISH_STORAGE_ACTION_PATTERN = re.compile(r"\b(" + ENGLISH_STORAGE_ACTION_PATTERN_TEXT + r")\b", re.IGNORECASE)
 NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
-    r"(?:do\s+not|don't|must\s+not|should\s+not|never|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
+    r"(?:do\s+not|don't|must\s+not|should\s+not|never|not|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
     re.IGNORECASE,
 )
-NEGATED_RAW_REFERENCE_PREFIX_PATTERN = re.compile(
+NEGATED_STORAGE_BEFORE_RAW_PATTERN = re.compile(
     r"(?:do\s+not|don't|must\s+not|should\s+not|never|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+"
-    r"(?:store|save|commit|write|persist|record)\b[^.!?;；]{0,80}$"
-    r"|without\s+(?:storing|saving|committing|writing|persisting|recording)\b[^.!?;；]{0,80}$"
-    r"|(?:not|no)\s+$",
+    + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    + r"\b(?P<body>[^.!?;；]{0,120})$"
+    + r"|without\s+"
+    + ENGLISH_STORAGE_GERUND_PATTERN_TEXT
+    + r"\b(?P<without_body>[^.!?;；]{0,120})$",
     re.IGNORECASE,
 )
-KOREAN_NEGATED_STORAGE_PATTERN = re.compile(r"저장\s*(?:하지|하지\s+않|금지|허용하지)")
+BARE_NEGATED_RAW_PREFIX_PATTERN = re.compile(r"(?:not|no)\s+$", re.IGNORECASE)
+ENGLISH_NEGATION_BOUNDARY_PATTERN = re.compile(
+    r"\b(?:but|however|except|instead)\b|,\s*(?:please\s+|then\s+)?"
+    + ENGLISH_STORAGE_ACTION_PATTERN_TEXT
+    + r"\b",
+    re.IGNORECASE,
+)
+KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(r"^[^.!?;；,\n\r]{0,80}저장\s*(?:하지|하지\s+않|금지|허용하지)")
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>" + "|".join(KOREAN_STORAGE_ACTIONS) + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요)",
 )
 REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
 SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
     r"\b(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
-    re.IGNORECASE,
-)
-DOCUMENT_WRITE_OBJECT_PATTERN = re.compile(
-    r"^\s+(?:an?\s+)?(?:agents\s+)?(?:doc|docs|documentation|policy|rule|rules|guidance|guide|readme)\b",
     re.IGNORECASE,
 )
 
@@ -127,16 +136,47 @@ def _unique_categories(matches: list[dict[str, Any]]) -> list[str]:
     return categories
 
 
+def _canonical_english_storage_action(action: str) -> str:
+    lowered = action.lower()
+    if lowered.startswith("stor"):
+        return "store"
+    if lowered.startswith("sav"):
+        return "save"
+    if lowered.startswith("commit"):
+        return "commit"
+    if lowered in {"write", "writes", "wrote", "written", "writing"}:
+        return "write"
+    if lowered.startswith("persist"):
+        return "persist"
+    if lowered.startswith("record"):
+        return "record"
+    return lowered
+
+
 def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
     prefix = text[max(0, raw_start - 120) : raw_start]
-    return NEGATED_RAW_REFERENCE_PREFIX_PATTERN.search(prefix) is not None
+    if BARE_NEGATED_RAW_PREFIX_PATTERN.search(prefix) is not None:
+        return True
+    match = NEGATED_STORAGE_BEFORE_RAW_PATTERN.search(prefix)
+    if match is None:
+        return False
+    body = match.groupdict().get("body") or match.groupdict().get("without_body") or ""
+    return ENGLISH_NEGATION_BOUNDARY_PATTERN.search(body) is None
+
+
+def _is_negated_korean_raw_reference(text: str, raw_end: int) -> bool:
+    suffix = text[raw_end : raw_end + 120]
+    return KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix) is not None
 
 
 def _active_raw_categories(text: str) -> list[str]:
-    if KOREAN_NEGATED_STORAGE_PATTERN.search(text) is not None:
-        return []
     return _unique_categories(
-        [match for match in _raw_category_matches(text) if not _is_negated_raw_reference(text, int(match["start"]))]
+        [
+            match
+            for match in _raw_category_matches(text)
+            if not _is_negated_raw_reference(text, int(match["start"]))
+            and not _is_negated_korean_raw_reference(text, int(match["end"]))
+        ]
     )
 
 
@@ -149,15 +189,12 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
     for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
         if _is_negated_english_action(clause, english_match.start()):
             continue
-        suffix = clause[english_match.end() :]
-        if english_match.group(1).lower() == "write" and DOCUMENT_WRITE_OBJECT_PATTERN.match(suffix):
-            continue
         window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
         window_categories = _active_raw_categories(window)
         if window_categories:
             return {
                 "matched_categories": ",".join(window_categories),
-                "matched_action": english_match.group(1).lower(),
+                "matched_action": _canonical_english_storage_action(english_match.group(1)),
             }
     return None
 
@@ -171,15 +208,10 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
         suffix = clause[english_match.end() : english_match.end() + 120]
         if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
             continue
-        if (
-            english_match.group(1).lower() == "write"
-            and DOCUMENT_WRITE_OBJECT_PATTERN.match(clause[english_match.end() :])
-        ):
-            continue
         if REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None:
             return {
                 "matched_categories": ",".join(previous_categories),
-                "matched_action": english_match.group(1).lower(),
+                "matched_action": _canonical_english_storage_action(english_match.group(1)),
             }
     return None
 
@@ -217,7 +249,10 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if cross_clause_match is not None:
             return cross_clause_match
 
-        previous_categories = categories
+        if categories:
+            previous_categories = categories
+        elif SAFE_SUMMARY_OBJECT_PATTERN.search(clause) is not None:
+            previous_categories = []
     return None
 
 
