@@ -521,6 +521,7 @@ class RubricodexContractTests(unittest.TestCase):
         for command in (
             "@Rubricodex implement the task now --run-id missing-lock",
             "@Rubricodex execute the task now",
+            "@Rubricodex execute tests and implement the fix --run-id missing-lock",
         ):
             with self.subTest(command=command):
                 result = evaluate_gate(

@@ -120,7 +120,7 @@ def _is_validation_run_prompt(text: str) -> bool:
 def _has_direct_rubricodex_handoff(text: str) -> bool:
     for match in DIRECT_RUBRICODEX_LINE_PATTERN.finditer(text):
         line = match.group(0)
-        if _is_validation_run_prompt(line):
+        if _is_validation_run_prompt(line) and not _is_implementation_handoff(line):
             continue
         if _is_implementation_handoff(line):
             return True
