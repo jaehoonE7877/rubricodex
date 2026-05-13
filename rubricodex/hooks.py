@@ -347,6 +347,9 @@ def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
     body = match.groupdict().get("body") or match.groupdict().get("without_body") or ""
     if re.search(r",|\b(?:but|however|except|instead)\b", body, re.IGNORECASE) is not None:
         return False
+    summary_match = SAFE_SUMMARY_OBJECT_PATTERN.search(body)
+    if summary_match is not None and SUMMARY_SOURCE_CONNECTOR_PATTERN.search(body[summary_match.end() :]) is not None:
+        return False
     return ENGLISH_NEGATION_BOUNDARY_PATTERN.search(body) is None
 
 
@@ -474,6 +477,14 @@ def _has_safe_analysis_reference_before(text: str) -> bool:
     return False
 
 
+def _has_safe_analysis_destination_before(prefix: str, suffix: str) -> bool:
+    return (
+        _has_safe_analysis_reference_before(prefix)
+        and REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is None
+        and DERIVED_OUTPUT_OBJECT_PATTERN.search(suffix) is not None
+    )
+
+
 def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
     first_policy_markers: list[int] = []
     for pattern in (POLICY_DOC_DESTINATION_PATTERN, POLICY_PROHIBITION_CONTEXT_PATTERN):
@@ -530,8 +541,9 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         suffix_preserves_raw = RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is not None
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
         prefix = clause[: english_match.start()]
-        safe_derived_before = _has_safe_derived_output_before(prefix) or (
-            _has_safe_analysis_reference_before(prefix) and DERIVED_OUTPUT_OBJECT_PATTERN.search(suffix) is not None
+        safe_derived_before = _has_safe_derived_output_before(prefix) or _has_safe_analysis_destination_before(
+            prefix,
+            suffix,
         )
         safe_summary_action = _is_safe_summary_storage_suffix(suffix) and (
             not prefix_categories or _has_safe_summary_transform_before(clause[: english_match.start()])
@@ -599,10 +611,7 @@ def _cross_clause_english_storage_match(
         safe_derived_pronoun_action = (
             (
                 _has_safe_derived_output_before(prefix)
-                or (
-                    _has_safe_analysis_reference_before(prefix)
-                    and DERIVED_OUTPUT_OBJECT_PATTERN.search(suffix) is not None
-                )
+                or _has_safe_analysis_destination_before(prefix, suffix)
             )
             and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_destination_prefix)
             and RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is None
