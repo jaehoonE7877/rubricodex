@@ -411,10 +411,47 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertEqual(result["decision"], "block")
                 self.assertIn("matched_categories=raw_transcript", result["reason"])
 
+    def test_hook_intake_blocks_cross_sentence_raw_storage_request(self) -> None:
+        cases = [
+            (
+                "@Rubricodex Here is the raw transcript. Store it in the repo.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex The raw command output is below. Please save it to evidence.json.",
+                "raw_command_output",
+                "save",
+            ),
+            (
+                "@Rubricodex raw transcript는 아래에 있어요. repo에 저장해줘.",
+                "raw_transcript",
+                "저장",
+            ),
+        ]
+
+        for prompt, category, action in cases:
+            with self.subTest(prompt=prompt):
+                result = evaluate_gate(
+                    "intake-boundary",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result["decision"], "block")
+                self.assertIn(f"matched_categories={category}", result["reason"])
+                self.assertIn(f"matched_action={action}", result["reason"])
+
     def test_hook_intake_allows_policy_and_agents_prompts(self) -> None:
         cases = [
             "@Rubricodex follow this policy: raw transcript는 repo에 저장하지 않습니다.",
             "@Rubricodex do not store raw transcripts or raw command output.",
+            "@Rubricodex store summarized evidence, not raw transcripts.",
+            "@Rubricodex write docs that say do not store raw transcripts.",
+            "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
 

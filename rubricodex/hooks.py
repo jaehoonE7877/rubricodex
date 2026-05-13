@@ -61,8 +61,25 @@ NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
     r"(?:do\s+not|don't|must\s+not|should\s+not|never|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
     re.IGNORECASE,
 )
+NEGATED_RAW_REFERENCE_PREFIX_PATTERN = re.compile(
+    r"(?:do\s+not|don't|must\s+not|should\s+not|never|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+"
+    r"(?:store|save|commit|write|persist|record)\b[^.!?;；]{0,80}$"
+    r"|without\s+(?:storing|saving|committing|writing|persisting|recording)\b[^.!?;；]{0,80}$"
+    r"|(?:not|no)\s+$",
+    re.IGNORECASE,
+)
+KOREAN_NEGATED_STORAGE_PATTERN = re.compile(r"저장\s*(?:하지|하지\s+않|금지|허용하지)")
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>" + "|".join(KOREAN_STORAGE_ACTIONS) + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요)",
+)
+REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
+SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
+    r"\b(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
+    re.IGNORECASE,
+)
+DOCUMENT_WRITE_OBJECT_PATTERN = re.compile(
+    r"^\s+(?:an?\s+)?(?:agents\s+)?(?:doc|docs|documentation|policy|rule|rules|guidance|guide|readme)\b",
+    re.IGNORECASE,
 )
 
 
@@ -86,13 +103,41 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in lowered for term in terms)
 
 
-def _matched_raw_categories(text: str) -> list[str]:
+def _raw_category_matches(text: str) -> list[dict[str, Any]]:
     lowered = text.lower()
-    return [
-        category
-        for category, terms in RAW_STORAGE_CATEGORIES.items()
-        if any(term in lowered for term in terms)
-    ]
+    matches: list[dict[str, Any]] = []
+    for category, terms in RAW_STORAGE_CATEGORIES.items():
+        for term in terms:
+            start = 0
+            while True:
+                index = lowered.find(term, start)
+                if index < 0:
+                    break
+                matches.append({"category": category, "start": index, "end": index + len(term)})
+                start = index + 1
+    return sorted(matches, key=lambda item: item["start"])
+
+
+def _unique_categories(matches: list[dict[str, Any]]) -> list[str]:
+    categories: list[str] = []
+    for match in matches:
+        category = str(match["category"])
+        if category not in categories:
+            categories.append(category)
+    return categories
+
+
+def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
+    prefix = text[max(0, raw_start - 120) : raw_start]
+    return NEGATED_RAW_REFERENCE_PREFIX_PATTERN.search(prefix) is not None
+
+
+def _active_raw_categories(text: str) -> list[str]:
+    if KOREAN_NEGATED_STORAGE_PATTERN.search(text) is not None:
+        return []
+    return _unique_categories(
+        [match for match in _raw_category_matches(text) if not _is_negated_raw_reference(text, int(match["start"]))]
+    )
 
 
 def _is_negated_english_action(text: str, action_start: int) -> bool:
@@ -100,32 +145,79 @@ def _is_negated_english_action(text: str, action_start: int) -> bool:
     return NEGATED_ENGLISH_ACTION_PREFIX_PATTERN.search(prefix) is not None
 
 
+def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
+    for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
+        if _is_negated_english_action(clause, english_match.start()):
+            continue
+        suffix = clause[english_match.end() :]
+        if english_match.group(1).lower() == "write" and DOCUMENT_WRITE_OBJECT_PATTERN.match(suffix):
+            continue
+        window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
+        window_categories = _active_raw_categories(window)
+        if window_categories:
+            return {
+                "matched_categories": ",".join(window_categories),
+                "matched_action": english_match.group(1).lower(),
+            }
+    return None
+
+
+def _cross_clause_english_storage_match(clause: str, previous_categories: list[str]) -> dict[str, str] | None:
+    if not previous_categories:
+        return None
+    for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
+        if _is_negated_english_action(clause, english_match.start()):
+            continue
+        suffix = clause[english_match.end() : english_match.end() + 120]
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
+            continue
+        if (
+            english_match.group(1).lower() == "write"
+            and DOCUMENT_WRITE_OBJECT_PATTERN.match(clause[english_match.end() :])
+        ):
+            continue
+        if REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None:
+            return {
+                "matched_categories": ",".join(previous_categories),
+                "matched_action": english_match.group(1).lower(),
+            }
+    return None
+
+
+def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] | None:
+    if not categories:
+        return None
+    korean_match = KOREAN_RAW_STORAGE_REQUEST_PATTERN.search(clause)
+    if korean_match is None:
+        return None
+    return {
+        "matched_categories": ",".join(categories),
+        "matched_action": korean_match.group("action"),
+    }
+
+
 def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
+    previous_categories: list[str] = []
     for clause in PROMPT_CLAUSE_PATTERN.split(prompt):
         clause = clause.strip()
         if not clause:
             continue
-        categories = _matched_raw_categories(clause)
-        if not categories:
-            continue
 
-        for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
-            if _is_negated_english_action(clause, english_match.start()):
-                continue
-            window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
-            window_categories = _matched_raw_categories(window)
-            if window_categories:
-                return {
-                    "matched_categories": ",".join(window_categories),
-                    "matched_action": english_match.group(1).lower(),
-                }
+        same_clause_match = _same_clause_english_storage_match(clause)
+        if same_clause_match is not None:
+            return same_clause_match
 
-        korean_match = KOREAN_RAW_STORAGE_REQUEST_PATTERN.search(clause)
+        categories = _active_raw_categories(clause)
+
+        korean_match = _korean_storage_match(clause, categories or previous_categories)
         if korean_match is not None:
-            return {
-                "matched_categories": ",".join(categories),
-                "matched_action": korean_match.group("action"),
-            }
+            return korean_match
+
+        cross_clause_match = _cross_clause_english_storage_match(clause, previous_categories)
+        if cross_clause_match is not None:
+            return cross_clause_match
+
+        previous_categories = categories
     return None
 
 
