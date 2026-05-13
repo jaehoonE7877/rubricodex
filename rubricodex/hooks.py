@@ -1077,25 +1077,7 @@ def _block(reason: str) -> dict[str, str]:
 
 
 def _raw_storage_advisory(prompt: str) -> dict[str, str] | None:
-    categories = _unique_categories(_raw_category_matches(prompt))
-    if not categories:
-        return None
-
-    matched_action = "mention"
-    for storage_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(prompt):
-        if not _is_negated_english_action(prompt, storage_match.start()):
-            matched_action = _canonical_english_storage_action(storage_match.group(1))
-            break
-    else:
-        for action in KOREAN_STORAGE_ACTIONS:
-            if action in prompt:
-                matched_action = action
-                break
-
-    return {
-        "matched_categories": ",".join(categories),
-        "matched_action": matched_action,
-    }
+    return _explicit_raw_storage_request(prompt)
 
 
 def _intake_advisory_context(match: dict[str, str] | None = None) -> str:

@@ -253,6 +253,12 @@ class RubricodexContractTests(unittest.TestCase):
         for category in categories.split(","):
             self.assertIn(category, context)
 
+    def assert_no_raw_storage_risk(self, result: dict[str, Any]) -> None:
+        context = self.hook_context(result)
+        self.assertIn("intake-boundary advisory", context)
+        self.assertNotIn("Raw artifact storage risk detected", context)
+        self.assertNotIn("matched_categories=", context)
+
     def write_default_contract(self, matrix: dict | None = None, evidence: dict | None = None) -> dict:
         write_json(intent_path(self.root), sample_brief())
         matrix = matrix or sample_matrix()
@@ -618,6 +624,17 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertNotEqual(result.get("decision"), "block")
                 self.assert_advised_categories(result, category)
 
+        mixed_result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex do not store raw transcript but store raw command output.",
+                "cwd": str(self.root),
+            },
+        )
+        self.assertIn("matched_categories=raw_command_output", self.hook_context(mixed_result))
+        self.assertNotIn("matched_categories=raw_transcript,raw_command_output", self.hook_context(mixed_result))
+
     def test_hook_intake_advises_storage_request_with_unrelated_negation(self) -> None:
         cases = [
             ("@Rubricodex don't redact anything, store the raw transcript in the repo.", "raw_transcript"),
@@ -944,8 +961,7 @@ class RubricodexContractTests(unittest.TestCase):
                 )
 
                 self.assertNotEqual(result.get("decision"), "block")
-                self.assert_advised_categories(result, category)
-                self.assertIn(f"matched_action={action}", self.hook_context(result))
+                self.assertIn("intake-boundary advisory", self.hook_context(result))
 
     def test_hook_intake_allows_policy_and_agents_prompts(self) -> None:
         cases = [
@@ -1058,6 +1074,7 @@ class RubricodexContractTests(unittest.TestCase):
                 )
 
                 self.assertNotEqual(result.get("decision"), "block")
+                self.assert_no_raw_storage_risk(result)
 
     def test_hook_matrix_readiness_blocks_implementation_without_lock(self) -> None:
         init_project(self.root)
