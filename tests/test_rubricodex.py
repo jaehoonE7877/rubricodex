@@ -592,6 +592,11 @@ class RubricodexContractTests(unittest.TestCase):
                 "store",
             ),
             (
+                "@Rubricodex Store everything below in .rubricodex. Do not include raw transcripts. raw command output: hello",
+                "raw_command_output",
+                "store",
+            ),
+            (
                 "@Rubricodex Save everything below to evidence.json. Include a summary. raw transcript: hello",
                 "raw_transcript",
                 "save",
@@ -696,6 +701,16 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
                 "add",
             ),
+            (
+                "@Rubricodex Here is the raw transcript. Extract requirements and save to evidence.json as-is.",
+                "raw_transcript",
+                "save",
+            ),
+            (
+                "@Rubricodex Here is the raw transcript. Extract requirements. Save verbatim to evidence.json.",
+                "raw_transcript",
+                "save",
+            ),
         ]
 
         for prompt, category, action in cases:
@@ -754,6 +769,7 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex keep raw command output out of the repo.",
             "@Rubricodex raw transcript is below. Keep it out of evidence.json.",
             "@Rubricodex Store everything below in .rubricodex. Do not include raw transcripts.",
+            "@Rubricodex Store everything below in .rubricodex. Do not include raw transcripts. raw transcript: hello",
             "@Rubricodex store the summary of the raw transcript in evidence.json.",
             "@Rubricodex store a summary of the raw transcript and add it to evidence.json.",
             "@Rubricodex store the summary of the raw transcript and add it to evidence.json.",

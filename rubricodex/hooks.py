@@ -603,6 +603,7 @@ def _cross_clause_english_storage_match(
                 )
             )
             and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_destination_prefix)
+            and RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is None
         )
         if safe_derived_pronoun_action:
             continue
@@ -636,6 +637,7 @@ def _cross_clause_raw_preserving_storage_match(
         if (
             REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is None
             and DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is None
+            and UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is None
         ):
             continue
         return {
@@ -708,6 +710,7 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
     previous_negated_categories: list[str] = []
     previous_safe_source_categories: list[str] = []
     pending_forward_storage: dict[str, str] | None = None
+    pending_forward_excluded_categories: list[str] = []
     for clause in PROMPT_CLAUSE_PATTERN.split(prompt):
         clause = clause.strip()
         if not clause:
@@ -719,6 +722,8 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
 
         raw_categories = _unique_categories(_raw_category_matches(clause))
         categories = _active_raw_categories(clause)
+        if categories and pending_forward_storage is not None:
+            categories = [category for category in categories if category not in pending_forward_excluded_categories]
         if categories and pending_forward_storage is not None:
             return {
                 "matched_categories": ",".join(categories),
@@ -750,6 +755,7 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             forward_storage_match = _forward_korean_storage_match(clause)
         if forward_storage_match is not None:
             pending_forward_storage = forward_storage_match
+            pending_forward_excluded_categories = []
             continue
 
         if _is_safe_output_clause(clause):
@@ -763,7 +769,9 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             previous_safe_source_categories = []
         elif raw_categories:
             previous_negated_categories = raw_categories
-            pending_forward_storage = None
+            for category in raw_categories:
+                if category not in pending_forward_excluded_categories:
+                    pending_forward_excluded_categories.append(category)
             previous_safe_source_categories = []
     return None
 
