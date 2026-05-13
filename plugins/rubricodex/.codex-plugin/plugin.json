@@ -1,6 +1,6 @@
 {
   "name": "rubricodex",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Compress ambiguous Codex implementation requests into bounded goals, evidence, scorecards, and retune instructions.",
   "author": {
     "name": "Rubricodex",

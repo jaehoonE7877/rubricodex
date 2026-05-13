@@ -6,7 +6,7 @@
   "mention": "@Rubricodex 우리 서비스에 POST /api/widgets endpoint를 추가해줘. 너무 무겁게 말고 기본 테스트까지.",
   "mode": "standard",
   "raw_transcript_stored": false,
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.3",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1",
   "selected_context_refs": [

@@ -6,7 +6,7 @@
   "prompt_path": ".rubricodex/taskpacks/example-v0.1/probes/C-01.md",
   "raw_output_stored": false,
   "read_only": true,
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.3",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1",
   "status": "probe_skipped",

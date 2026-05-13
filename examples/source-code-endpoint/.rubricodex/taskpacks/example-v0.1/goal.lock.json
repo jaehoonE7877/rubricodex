@@ -65,9 +65,9 @@
   "mode": "standard",
   "revision": {
     "approved_at": "2026-05-12T06:54:57Z",
-    "reason": "v1.0.2 package version refresh; no artifact contract shape change."
+    "reason": "v1.0.3 package version refresh; no artifact contract shape change."
   },
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.3",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1"
 }

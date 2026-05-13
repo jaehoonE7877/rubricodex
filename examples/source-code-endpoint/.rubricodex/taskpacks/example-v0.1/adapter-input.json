@@ -6,7 +6,7 @@
   "goal_path": ".rubricodex/taskpacks/example-v0.1/goal.md",
   "matrix_path": ".rubricodex/matrix/evaluation-matrix.json",
   "mode": "standard",
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.3",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1"
 }
