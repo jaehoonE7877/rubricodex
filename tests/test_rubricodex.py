@@ -8,6 +8,7 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 from rubricodex import __version__
 from rubricodex.hooks import evaluate_gate
@@ -238,6 +239,20 @@ class RubricodexContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def hook_context(self, result: dict[str, Any]) -> str:
+        output = result.get("hookSpecificOutput", {})
+        if isinstance(output, dict):
+            context = output.get("additionalContext")
+            if isinstance(context, str):
+                return context
+        return str(result.get("reason", ""))
+
+    def assert_advised_categories(self, result: dict[str, Any], categories: str) -> None:
+        context = self.hook_context(result)
+        self.assertIn("matched_categories=", context)
+        for category in categories.split(","):
+            self.assertIn(category, context)
+
     def write_default_contract(self, matrix: dict | None = None, evidence: dict | None = None) -> dict:
         write_json(intent_path(self.root), sample_brief())
         matrix = matrix or sample_matrix()
@@ -345,7 +360,7 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertEqual(result["status"], "fail")
                 self.assertIn("$.schema", {issue["path"] for issue in result["issues"]})
 
-    def test_hook_intake_blocks_raw_storage_prompt(self) -> None:
+    def test_hook_intake_advises_raw_storage_prompt(self) -> None:
         result = evaluate_gate(
             "intake-boundary",
             {
@@ -355,13 +370,27 @@ class RubricodexContractTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["decision"], "block")
-        self.assertIn("intake-boundary blocked", result["reason"])
-        self.assertIn("matched_categories=raw_transcript,raw_command_output", result["reason"])
-        self.assertIn("matched_action=store", result["reason"])
-        self.assertNotIn("store the raw transcript", result["reason"])
+        self.assertNotEqual(result.get("decision"), "block")
+        self.assertIn("intake-boundary advisory", self.hook_context(result))
+        self.assertIn("matched_categories=raw_transcript,raw_command_output", self.hook_context(result))
+        self.assertIn("matched_action=store", self.hook_context(result))
+        self.assertNotIn("reason", result)
+        self.assertNotIn("store the raw transcript", self.hook_context(result))
 
-    def test_hook_intake_blocks_explicit_korean_raw_storage_prompt(self) -> None:
+    def test_hook_intake_allows_first_rubricodex_prompt(self) -> None:
+        result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex 우리 서비스에 POST /api/widgets endpoint를 추가해줘. 기본 테스트까지.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertNotEqual(result.get("decision"), "block")
+        self.assertIn("intake-boundary advisory", self.hook_context(result))
+
+    def test_hook_intake_advises_explicit_korean_raw_storage_prompt(self) -> None:
         cases = [
             ("@Rubricodex raw transcript를 repo에 저장해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript repo에 저장", "raw_transcript", "저장"),
@@ -408,11 +437,11 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn(f"matched_categories={category}", result["reason"])
-                self.assertIn(f"matched_action={action}", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assert_advised_categories(result, category)
+                self.assertIn(f"matched_action={action}", self.hook_context(result))
 
-    def test_hook_intake_blocks_unredacted_command_output_without_raw_word(self) -> None:
+    def test_hook_intake_advises_unredacted_command_output_without_raw_word(self) -> None:
         for prompt in (
             "@Rubricodex store unredacted command output in the repo.",
             "@Rubricodex write unredacted command output to .rubricodex/runs/foo/evidence.json.",
@@ -427,10 +456,10 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn("matched_categories=raw_command_output", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assertIn("matched_categories=raw_command_output", self.hook_context(result))
 
-    def test_hook_intake_blocks_inflected_raw_storage_actions(self) -> None:
+    def test_hook_intake_advises_inflected_raw_storage_actions(self) -> None:
         cases = [
             (
                 "@Rubricodex create a file that stores the raw transcript.",
@@ -490,11 +519,11 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn(f"matched_categories={category}", result["reason"])
-                self.assertIn(f"matched_action={action}", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assert_advised_categories(result, category)
+                self.assertIn(f"matched_action={action}", self.hook_context(result))
 
-    def test_hook_intake_blocks_raw_containing_document_writes(self) -> None:
+    def test_hook_intake_advises_raw_containing_document_writes(self) -> None:
         for prompt in (
             "@Rubricodex write docs with the raw transcript.",
             "@Rubricodex write documentation containing raw command output.",
@@ -524,10 +553,10 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn("intake-boundary blocked", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assertIn("intake-boundary advisory", self.hook_context(result))
 
-    def test_hook_intake_blocks_mixed_negative_and_raw_storage_prompt(self) -> None:
+    def test_hook_intake_advises_mixed_negative_and_raw_storage_prompt(self) -> None:
         cases = [
             (
                 "@Rubricodex do not store raw transcript but store raw command output.",
@@ -586,10 +615,10 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn(f"matched_categories={category}", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assert_advised_categories(result, category)
 
-    def test_hook_intake_blocks_storage_request_with_unrelated_negation(self) -> None:
+    def test_hook_intake_advises_storage_request_with_unrelated_negation(self) -> None:
         cases = [
             ("@Rubricodex don't redact anything, store the raw transcript in the repo.", "raw_transcript"),
             ("@Rubricodex store the raw transcript without storing summaries.", "raw_transcript"),
@@ -636,10 +665,10 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn(f"matched_categories={category}", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assert_advised_categories(result, category)
 
-    def test_hook_intake_blocks_cross_sentence_raw_storage_request(self) -> None:
+    def test_hook_intake_advises_cross_sentence_raw_storage_request(self) -> None:
         cases = [
             (
                 "@Rubricodex Store everything below in .rubricodex. raw transcript: hello",
@@ -866,11 +895,11 @@ class RubricodexContractTests(unittest.TestCase):
                     },
                 )
 
-                self.assertEqual(result["decision"], "block")
-                self.assertIn(f"matched_categories={category}", result["reason"])
-                self.assertIn(f"matched_action={action}", result["reason"])
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assert_advised_categories(result, category)
+                self.assertIn(f"matched_action={action}", self.hook_context(result))
 
-    def test_hook_intake_blocks_long_inline_raw_storage_request(self) -> None:
+    def test_hook_intake_advises_long_inline_raw_storage_request(self) -> None:
         prompt = "@Rubricodex raw transcript: " + ("line " * 80) + "store it in the repo."
         result = evaluate_gate(
             "intake-boundary",
@@ -881,9 +910,42 @@ class RubricodexContractTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["decision"], "block")
-        self.assertIn("matched_categories=raw_transcript", result["reason"])
-        self.assertIn("matched_action=store", result["reason"])
+        self.assertNotEqual(result.get("decision"), "block")
+        self.assertIn("matched_categories=raw_transcript", self.hook_context(result))
+        self.assertIn("matched_action=store", self.hook_context(result))
+
+    def test_hook_intake_advises_delayed_same_clause_raw_storage_request(self) -> None:
+        cases = [
+            (
+                "@Rubricodex store the provided session bundle with metadata, context refs, "
+                "decision notes, agent messages, tool messages, screenshots, attachments, "
+                "and the raw transcript in evidence.json.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex save the provided session bundle with metadata, context refs, "
+                "decision notes, agent messages, tool messages, screenshots, attachments, "
+                "and raw command output to evidence.json.",
+                "raw_command_output",
+                "save",
+            ),
+        ]
+
+        for prompt, category, action in cases:
+            with self.subTest(prompt=prompt):
+                result = evaluate_gate(
+                    "intake-boundary",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": prompt,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertNotEqual(result.get("decision"), "block")
+                self.assert_advised_categories(result, category)
+                self.assertIn(f"matched_action={action}", self.hook_context(result))
 
     def test_hook_intake_allows_policy_and_agents_prompts(self) -> None:
         cases = [
@@ -980,6 +1042,7 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write AGENTS.md to forbid storing raw transcripts and commit it.",
             "@Rubricodex add a rule that bans raw transcripts from being stored and save it to AGENTS.md.",
             "@Rubricodex do not store raw transcript; write a summary.",
+            "@Rubricodex write docs about the repository policy and implementation guidance that raw transcripts are not stored in repo.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
 
@@ -1021,6 +1084,18 @@ class RubricodexContractTests(unittest.TestCase):
             {
                 "hook_event_name": "UserPromptSubmit",
                 "prompt": "run tests",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_allows_first_rubricodex_prompt_without_artifacts(self) -> None:
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex implement a small endpoint with tests.",
                 "cwd": str(self.root),
             },
         )
@@ -1194,6 +1269,16 @@ class RubricodexContractTests(unittest.TestCase):
         brief = sample_brief()
         brief["raw_transcript"] = "do not store this"
         self.assertTrue(validate_brief(brief))
+
+    def test_artifact_validators_reject_raw_storage_fields(self) -> None:
+        brief = sample_brief()
+        brief["raw_task_log"] = "do not store this"
+        self.assertIn("$.raw_task_log", {issue.path for issue in validate_brief(brief)})
+
+        matrix = sample_matrix()
+        evidence = sample_evidence(matrix)
+        evidence["unredacted_command_output"] = "do not store this"
+        self.assertIn("$.unredacted_command_output", {issue.path for issue in validate_evidence(evidence, matrix)})
 
     def test_matrix_valid_passes(self) -> None:
         self.assertEqual(validate_matrix(sample_matrix()), [])

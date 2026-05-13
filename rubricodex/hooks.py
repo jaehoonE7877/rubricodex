@@ -1076,11 +1076,39 @@ def _block(reason: str) -> dict[str, str]:
     return {"decision": "block", "reason": reason}
 
 
-def _intake_block_reason(match: dict[str, str]) -> str:
+def _raw_storage_advisory(prompt: str) -> dict[str, str] | None:
+    categories = _unique_categories(_raw_category_matches(prompt))
+    if not categories:
+        return None
+
+    matched_action = "mention"
+    for storage_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(prompt):
+        if not _is_negated_english_action(prompt, storage_match.start()):
+            matched_action = _canonical_english_storage_action(storage_match.group(1))
+            break
+    else:
+        for action in KOREAN_STORAGE_ACTIONS:
+            if action in prompt:
+                matched_action = action
+                break
+
+    return {
+        "matched_categories": ",".join(categories),
+        "matched_action": matched_action,
+    }
+
+
+def _intake_advisory_context(match: dict[str, str] | None = None) -> str:
+    base = (
+        "Rubricodex intake-boundary advisory: classify mode, write intent brief, keep explicit "
+        "scope_in/scope_out, and store only summarized evidence."
+    )
+    if match is None:
+        return base
     return (
-        "Rubricodex intake-boundary blocked: explicit raw artifact storage request detected; "
-        f"matched_categories={match['matched_categories']}; matched_action={match['matched_action']}. "
-        "Use summarized evidence instead."
+        f"{base} Raw artifact storage risk detected; matched_categories={match['matched_categories']}; "
+        f"matched_action={match['matched_action']}. Do not store raw transcripts, raw task logs, "
+        "or unredacted command output."
     )
 
 
@@ -1130,16 +1158,12 @@ def _summarize_status(status: dict[str, Any]) -> str:
 
 
 def evaluate_intake_boundary(payload: dict[str, Any]) -> dict[str, Any]:
-    root = _cwd(payload)
     prompt = str(payload.get("prompt") or "")
     if not _is_rubricodex_prompt(prompt):
         return {}
-    raw_storage_request = _explicit_raw_storage_request(prompt)
-    if raw_storage_request is not None:
-        return _block(_intake_block_reason(raw_storage_request))
     return _additional_context(
         "UserPromptSubmit",
-        "Rubricodex intake boundary: classify mode, write intent brief, keep explicit scope_in/scope_out, and store only summarized evidence.",
+        _intake_advisory_context(_raw_storage_advisory(prompt)),
     )
 
 
