@@ -138,14 +138,30 @@ CHANGE_INTENT_KEYWORDS = {
     "추가",
 }
 
-FORBIDDEN_KEYS = {
+def _normalize_artifact_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+
+
+FORBIDDEN_KEY_LABELS = (
     "raw_transcript",
     "raw_chat_transcript",
     "raw_task_log",
     "raw_codex_log",
     "raw_command_output",
     "unredacted_command_output",
-}
+    "raw_output",
+    "unredacted_output",
+    "command_output",
+    "stdout",
+    "stderr",
+)
+FORBIDDEN_KEYS = {_normalize_artifact_key(key) for key in FORBIDDEN_KEY_LABELS}
+FORBIDDEN_RAW_VALUE_PATTERN = re.compile(
+    r"(?im)^\s*(?:[-*+]\s+|#{1,6}\s*|>\s*)*(?:"
+    r"raw transcript|raw chat transcript|raw task log|raw codex log|"
+    r"raw command output|unredacted command output|stdout|stderr"
+    r")\s*:",
+)
 
 GOAL_HEADINGS = (
     "Purpose",
@@ -753,12 +769,14 @@ def validate_forbidden_keys(value: Any, path: str = "$") -> list[ValidationIssue
     if isinstance(value, dict):
         for key, child in value.items():
             key_text = str(key)
-            if key_text.lower() in FORBIDDEN_KEYS:
+            if _normalize_artifact_key(key_text) in FORBIDDEN_KEYS:
                 issues.append(ValidationIssue(f"{path}.{key_text}", "raw transcript/log/output fields are not allowed"))
             issues.extend(validate_forbidden_keys(child, f"{path}.{key_text}"))
     elif isinstance(value, list):
         for index, child in enumerate(value):
             issues.extend(validate_forbidden_keys(child, f"{path}[{index}]"))
+    elif isinstance(value, str) and FORBIDDEN_RAW_VALUE_PATTERN.search(value):
+        issues.append(ValidationIssue(path, "raw transcript/log/output content markers are not allowed"))
     return issues
 
 
