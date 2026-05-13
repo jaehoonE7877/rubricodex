@@ -542,6 +542,8 @@ def _has_safe_analysis_destination_before(prefix: str, suffix: str) -> bool:
 
 
 def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
+    if action not in {"include", "add", "write", "save", "commit", "persist", "record"}:
+        return False
     first_policy_markers: list[int] = []
     for pattern in (POLICY_DOC_DESTINATION_PATTERN, POLICY_PROHIBITION_CONTEXT_PATTERN):
         match = pattern.search(suffix)
@@ -552,9 +554,12 @@ def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
         if UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix[:policy_start]) is not None:
             return False
     raw_matches = _raw_category_matches(suffix)
+    if action not in {"include", "add", "write"} and first_policy_markers:
+        policy_start = min(first_policy_markers)
+        if raw_matches and all(int(match["start"]) < policy_start for match in raw_matches):
+            return False
     return (
-        action in {"include", "add", "write"}
-        and POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
+        POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
         and raw_matches
         and any(_has_policy_prohibition_context_for_raw(suffix, match) for match in raw_matches)
         and POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN.search(suffix) is None
@@ -569,6 +574,13 @@ def _has_policy_prohibition_context_for_raw(suffix: str, raw_match: dict[str, An
     return (
         POLICY_PROHIBITION_BEFORE_RAW_PATTERN.search(before) is not None
         or POLICY_PROHIBITION_AFTER_RAW_PATTERN.search(after) is not None
+    )
+
+
+def _is_policy_negation_clause(clause: str, raw_matches: list[dict[str, Any]]) -> bool:
+    return (
+        POLICY_DOC_DESTINATION_PATTERN.search(clause) is not None
+        and any(_has_policy_prohibition_context_for_raw(clause, match) for match in raw_matches)
     )
 
 
@@ -866,7 +878,8 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if same_clause_match is not None:
             return same_clause_match
 
-        raw_categories = _unique_categories(_raw_category_matches(clause))
+        raw_matches = _raw_category_matches(clause)
+        raw_categories = _unique_categories(raw_matches)
         categories = _active_raw_categories(clause)
         if categories and pending_forward_storage is not None:
             categories = [category for category in categories if category not in pending_forward_excluded_categories]
@@ -930,11 +943,15 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             previous_categories = []
             previous_negated_categories = []
         elif categories:
-            previous_categories = categories
-            previous_negated_categories = []
+            if _is_policy_negation_clause(clause, raw_matches):
+                previous_categories = []
+                previous_negated_categories = []
+            else:
+                previous_categories = categories
+                previous_negated_categories = []
             previous_safe_source_categories = []
         elif raw_categories:
-            previous_negated_categories = raw_categories
+            previous_negated_categories = [] if _is_policy_negation_clause(clause, raw_matches) else raw_categories
             for category in raw_categories:
                 if category not in pending_forward_excluded_categories:
                     pending_forward_excluded_categories.append(category)

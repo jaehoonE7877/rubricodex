@@ -533,6 +533,10 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
             ),
             (
+                "@Rubricodex do not store raw transcript. Save it to repo.",
+                "raw_transcript",
+            ),
+            (
                 "@Rubricodex do not store raw transcript and store it in evidence.json.",
                 "raw_transcript",
             ),
@@ -851,9 +855,11 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write docs forbidding raw transcripts.",
             "@Rubricodex write docs that prohibit storing raw transcripts.",
             "@Rubricodex write AGENTS.md to forbid storing raw transcripts.",
+            "@Rubricodex commit AGENTS.md with a rule forbidding raw transcripts.",
             "@Rubricodex write docs to ban raw transcripts from being stored.",
             "@Rubricodex write docs to prohibit raw transcripts from being stored.",
             "@Rubricodex add a rule that bans raw transcripts from being stored.",
+            "@Rubricodex persist a policy listing raw transcripts as disallowed.",
             "@Rubricodex write a policy listing raw transcripts as disallowed.",
             "@Rubricodex write docs listing raw command output as forbidden.",
             "@Rubricodex include raw transcripts in the policy as disallowed items.",
@@ -916,6 +922,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex raw transcript 저장을 막는 로직을 구현해줘.",
             "@Rubricodex raw transcript 저장 방지 코드를 작성해줘.",
             "@Rubricodex raw transcript 저장 안 하게 해줘.",
+            "@Rubricodex write docs that say do not store raw transcripts. Save them to repo.",
+            "@Rubricodex write AGENTS.md to forbid storing raw transcripts. Commit it.",
+            "@Rubricodex add a rule that bans raw transcripts from being stored. Save it to AGENTS.md.",
             "@Rubricodex do not store raw transcript; write a summary.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
