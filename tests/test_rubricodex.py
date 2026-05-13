@@ -499,6 +499,16 @@ class RubricodexContractTests(unittest.TestCase):
     def test_hook_intake_blocks_cross_sentence_raw_storage_request(self) -> None:
         cases = [
             (
+                "@Rubricodex Store everything below in .rubricodex. raw transcript: hello",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex Save the following to evidence.json. raw command output: hello",
+                "raw_command_output",
+                "save",
+            ),
+            (
                 "@Rubricodex Here is the raw transcript. Store it in the repo.",
                 "raw_transcript",
                 "store",

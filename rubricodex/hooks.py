@@ -107,6 +107,12 @@ SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
     r"evidence(?:\.json)?|report|scorecard|matrix|taskpack|requirements|policy|docs?|documentation)\b",
     re.IGNORECASE,
 )
+FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
+    r"\b(?:everything\s+(?:below|above|that\s+follows)|the\s+following|"
+    r"following\s+(?:content|input|text|transcript|output)|"
+    r"all\s+(?:of\s+)?(?:this|the\s+following|content|input|text|details|below))\b",
+    re.IGNORECASE,
+)
 
 
 def _cwd(payload: dict[str, Any]) -> Path:
@@ -257,6 +263,21 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
     return None
 
 
+def _forward_english_storage_match(clause: str) -> dict[str, str] | None:
+    for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
+        if _is_negated_english_action(clause, english_match.start()):
+            continue
+        suffix = clause[english_match.end() : english_match.end() + 160]
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
+            continue
+        if FORWARD_STORAGE_OBJECT_PATTERN.search(suffix) is None:
+            continue
+        return {
+            "matched_action": _canonical_english_storage_action(english_match.group(1)),
+        }
+    return None
+
+
 def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] | None:
     if not categories:
         return None
@@ -271,6 +292,7 @@ def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] 
 
 def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
     previous_categories: list[str] = []
+    pending_forward_storage: dict[str, str] | None = None
     for clause in PROMPT_CLAUSE_PATTERN.split(prompt):
         clause = clause.strip()
         if not clause:
@@ -281,6 +303,11 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             return same_clause_match
 
         categories = _active_raw_categories(clause)
+        if categories and pending_forward_storage is not None:
+            return {
+                "matched_categories": ",".join(categories),
+                "matched_action": pending_forward_storage["matched_action"],
+            }
 
         korean_match = _korean_storage_match(clause, categories or previous_categories)
         if korean_match is not None:
@@ -290,10 +317,16 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if cross_clause_match is not None:
             return cross_clause_match
 
+        forward_storage_match = _forward_english_storage_match(clause)
+        if forward_storage_match is not None:
+            pending_forward_storage = forward_storage_match
+            continue
+
         if categories:
             previous_categories = categories
         elif SAFE_SUMMARY_OBJECT_PATTERN.search(clause) is not None:
             previous_categories = []
+            pending_forward_storage = None
     return None
 
 
