@@ -368,6 +368,8 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex raw transcript 저장하고 요약도 작성해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript 저장한 뒤 요약도 작성해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript 저장하고 요약은 저장하지 마.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript를 요약하지 말고 저장해줘.", "raw_transcript", "저장"),
+            ("@Rubricodex 요약도 작성하고 raw transcript 저장해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw task log 기록", "raw_task_log", "기록"),
             ("@Rubricodex raw command output 커밋", "raw_command_output", "커밋"),
         ]
@@ -526,6 +528,8 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex don't redact anything, store the raw transcript in the repo.", "raw_transcript"),
             ("@Rubricodex store the raw transcript without storing summaries.", "raw_transcript"),
             ("@Rubricodex don't save anything else and store raw transcript.", "raw_transcript"),
+            ("@Rubricodex do not summarize the raw transcript, save it as-is.", "raw_transcript"),
+            ("@Rubricodex do not summarize raw transcript, store it in repo.", "raw_transcript"),
             ("@Rubricodex store raw transcript in repo but never persist summaries.", "raw_transcript"),
             ("@Rubricodex store raw transcript and do not store summaries.", "raw_transcript"),
             ("@Rubricodex raw transcript should be stored in repo and never persisted elsewhere.", "raw_transcript"),

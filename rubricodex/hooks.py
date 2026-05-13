@@ -137,6 +137,11 @@ SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SUMMARY_TRANSFORM_PATTERN = re.compile(r"\b(?:summari[sz]e|redact|saniti[sz]e)\b|요약", re.IGNORECASE)
+SUMMARY_TRANSFORM_VERB_PATTERN = re.compile(r"\b(?:summari[sz]e|redact|saniti[sz]e)\b", re.IGNORECASE)
+NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN = re.compile(
+    r"(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|never|not)\s+$",
+    re.IGNORECASE,
+)
 SUMMARY_SOURCE_CONNECTOR_PATTERN = re.compile(r"\b(?:of|from|about)\b", re.IGNORECASE)
 RAW_INCLUSION_CONNECTOR_PATTERN = re.compile(
     r"\b(?:and|plus|with|alongside|including|containing)\b",
@@ -281,7 +286,14 @@ def _is_negated_korean_action(text: str, action_start: int) -> bool:
 
 
 def _is_safe_korean_summary_action(text: str, action_start: int) -> bool:
-    return "요약" in text[max(0, action_start - 80) : action_start]
+    window = text[max(0, action_start - 80) : action_start]
+    summary_index = window.rfind("요약")
+    if summary_index < 0:
+        return False
+    summary_context = window[summary_index:]
+    if re.search(r"요약\s*하지|요약하지", summary_context) is not None:
+        return False
+    return not _raw_category_matches(summary_context)
 
 
 def _has_affirmative_korean_storage_action(text: str) -> bool:
@@ -336,6 +348,14 @@ def _has_affirmative_storage_action(text: str) -> bool:
     return False
 
 
+def _has_safe_summary_transform_before(text: str) -> bool:
+    for transform_match in SUMMARY_TRANSFORM_VERB_PATTERN.finditer(text):
+        prefix = text[max(0, transform_match.start() - 40) : transform_match.start()]
+        if NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN.search(prefix) is None:
+            return True
+    return False
+
+
 def _is_safe_summary_storage_suffix(suffix: str) -> bool:
     summary_match = SAFE_SUMMARY_OBJECT_PATTERN.search(suffix)
     if summary_match is None:
@@ -366,11 +386,11 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         suffix_categories = _active_raw_categories(suffix)
         suffix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
         safe_summary_action = _is_safe_summary_storage_suffix(suffix) and (
-            not prefix_categories or SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None
+            not prefix_categories or _has_safe_summary_transform_before(clause[: english_match.start()])
         )
         safe_summary_reference_action = (
             not suffix_categories
-            and SUMMARY_TRANSFORM_PATTERN.search(clause[: english_match.start()]) is not None
+            and _has_safe_summary_transform_before(clause[: english_match.start()])
             and suffix_raw_reference
         )
         safe_followup_action = (
