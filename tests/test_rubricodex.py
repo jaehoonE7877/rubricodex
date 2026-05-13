@@ -838,6 +838,21 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_task_log",
                 "save",
             ),
+            (
+                "@Rubricodex raw command output: hello. Save the output to evidence.json.",
+                "raw_command_output",
+                "save",
+            ),
+            (
+                "@Rubricodex raw transcript: hello. Save the transcript to evidence.json.",
+                "raw_transcript",
+                "save",
+            ),
+            (
+                "@Rubricodex raw task log: hello. Commit the log to repo.",
+                "raw_task_log",
+                "commit",
+            ),
         ]
 
         for prompt, category, action in cases:

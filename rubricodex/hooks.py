@@ -152,6 +152,20 @@ KOREAN_ATTRIBUTIVE_STORAGE_TARGET_PATTERN = re.compile(
     r"|(?:만들|구현|작성|생성|추가|수정|패치|적용|해줘|해주세요)"
 )
 REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
+NAMED_RAW_REFERENCE_PATTERNS = {
+    "raw_transcript": re.compile(
+        r"\b(?:the\s+|same\s+|this\s+|that\s+|raw\s+)?(?:chat\s+)?transcripts?\b",
+        re.IGNORECASE,
+    ),
+    "raw_task_log": re.compile(
+        r"\b(?:the\s+|same\s+|this\s+|that\s+|raw\s+)?(?:(?:task|codex)\s+)?logs?\b",
+        re.IGNORECASE,
+    ),
+    "raw_command_output": re.compile(
+        r"\b(?:the\s+|same\s+|this\s+|that\s+|raw\s+)?(?:command\s+)?outputs?\b",
+        re.IGNORECASE,
+    ),
+}
 SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
     r"\b(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
     re.IGNORECASE,
@@ -326,6 +340,15 @@ def _unique_categories(matches: list[dict[str, Any]]) -> list[str]:
     for match in matches:
         category = str(match["category"])
         if category not in categories:
+            categories.append(category)
+    return categories
+
+
+def _named_raw_reference_categories(text: str, previous_categories: list[str]) -> list[str]:
+    categories: list[str] = []
+    for category in previous_categories:
+        pattern = NAMED_RAW_REFERENCE_PATTERNS.get(category)
+        if pattern is not None and pattern.search(text) is not None:
             categories.append(category)
     return categories
 
@@ -758,12 +781,17 @@ def _cross_clause_english_storage_match(
         if _is_safe_broad_storage_action(action, suffix):
             continue
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+        named_suffix_categories = _named_raw_reference_categories(suffix, previous_categories)
+        has_named_raw_reference = bool(named_suffix_categories)
         has_bulk_raw_reference = CROSS_RAW_BULK_OBJECT_PATTERN.search(suffix) is not None
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
         has_unsafe_destination = UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is not None
         has_storage_destination = has_unsafe_destination if action in BROAD_ENGLISH_STORAGE_ACTIONS else has_destination_prefix
         prefix = clause[: english_match.start()]
         has_prefix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(prefix) is not None
+        named_prefix_categories = _named_raw_reference_categories(prefix, previous_categories)
+        has_prefix_named_raw_reference = bool(named_prefix_categories)
+        matched_categories = named_suffix_categories or named_prefix_categories or previous_categories
         safe_derived_pronoun_action = (
             (
                 _has_safe_derived_output_before(prefix)
@@ -774,7 +802,13 @@ def _cross_clause_english_storage_match(
         )
         if safe_derived_pronoun_action:
             continue
-        if require_raw_reference and not has_raw_reference and not has_prefix_raw_reference:
+        if (
+            require_raw_reference
+            and not has_raw_reference
+            and not has_prefix_raw_reference
+            and not has_named_raw_reference
+            and not has_prefix_named_raw_reference
+        ):
             continue
         if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_storage_destination:
             continue
@@ -784,18 +818,24 @@ def _cross_clause_english_storage_match(
             continue
         if has_bulk_raw_reference:
             return {
-                "matched_categories": ",".join(previous_categories),
+                "matched_categories": ",".join(matched_categories),
                 "matched_action": action,
             }
-        if not has_raw_reference and not has_storage_destination and not has_prefix_raw_reference:
+        if (
+            not has_raw_reference
+            and not has_storage_destination
+            and not has_prefix_raw_reference
+            and not has_named_raw_reference
+            and not has_prefix_named_raw_reference
+        ):
             if _is_bare_english_storage_imperative(action, prefix, suffix):
                 return {
-                    "matched_categories": ",".join(previous_categories),
+                    "matched_categories": ",".join(matched_categories),
                     "matched_action": action,
                 }
             continue
         return {
-            "matched_categories": ",".join(previous_categories),
+            "matched_categories": ",".join(matched_categories),
             "matched_action": action,
         }
     return None
