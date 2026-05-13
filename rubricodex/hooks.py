@@ -108,6 +108,11 @@ RAW_INCLUSION_CONNECTOR_PATTERN = re.compile(
     r"\b(?:and|plus|with|alongside|including|containing)\b",
     re.IGNORECASE,
 )
+SUMMARY_ONLY_FORWARD_OBJECT_PATTERN = re.compile(
+    r"^\s+(?:the\s+following\s+)?(?:a\s+|an\s+|the\s+)?"
+    r"(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
+    re.IGNORECASE,
+)
 SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
     r"^\s+(?:the\s+|a\s+|an\s+|this\s+|that\s+|our\s+|my\s+)?"
     r"(?:goal\s+lock|intent\s+brief|brief|summary|summaries|summarized\s+evidence|redacted\s+summary|"
@@ -279,7 +284,7 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
         action = _canonical_english_storage_action(english_match.group(1))
         reference_window = clause[max(0, english_match.start() - 80) : english_match.end() + 120]
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(reference_window) is not None
-        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference:
             continue
         if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference:
             continue
@@ -296,7 +301,7 @@ def _forward_english_storage_match(clause: str) -> dict[str, str] | None:
         if _is_negated_english_action(clause, english_match.start()):
             continue
         suffix = clause[english_match.end() : english_match.end() + 160]
-        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
+        if SUMMARY_ONLY_FORWARD_OBJECT_PATTERN.search(suffix) is not None:
             continue
         if FORWARD_STORAGE_OBJECT_PATTERN.search(suffix) is None:
             continue

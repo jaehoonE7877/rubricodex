@@ -448,6 +448,7 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write an AGENTS policy with the raw transcript.",
             "@Rubricodex Here is the raw transcript. Write docs with it.",
             "@Rubricodex Here is raw command output. Save documentation with it.",
+            "@Rubricodex Here is the raw transcript. Save the summary and it to evidence.json.",
         ):
             with self.subTest(prompt=prompt):
                 result = evaluate_gate(
@@ -515,6 +516,11 @@ class RubricodexContractTests(unittest.TestCase):
         cases = [
             (
                 "@Rubricodex Store everything below in .rubricodex. raw transcript: hello",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex Store everything below, including a summary. raw transcript: hello",
                 "raw_transcript",
                 "store",
             ),
