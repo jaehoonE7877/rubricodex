@@ -34,28 +34,45 @@ RAW_STORAGE_TERMS = (
 )
 STORE_TERMS = ("store", "save", "commit", "write", "persist", "record", "저장", "커밋", "기록")
 IMPLEMENT_TERMS = ("implement", "handoff", "start coding", "start implementation", "begin implementation", "구현")
+RUN_ID_PATTERN = re.compile(r"--run-id(?:=|\s+)([A-Za-z0-9_.-]+)")
+DIRECT_RUBRICODEX_LINE_PATTERN = re.compile(r"(?im)^\s*(?:[-*+]\s*)?@rubricodex\b[^\n]*")
 ENGLISH_COMPLETION_TERMS = ("complete", "completed")
-KOREAN_COMPLETION_TERMS = ("완료", "준비", "통과")
 EXECUTE_CONTEXT_PATTERN = re.compile(
     r"\b(?:execute|proceed)\b[^\n.!?]{0,60}\b(?:task|work|implementation|change|changes|feature|fix|goal)\b"
     r"|\b(?:task|work|implementation|change|changes|feature|fix|goal)\b[^\n.!?]{0,60}\b(?:execute|proceed)\b",
     re.IGNORECASE,
 )
 KOREAN_IMPLEMENTATION_CONTEXT_PATTERN = re.compile(r"(?:작업|개발|변경)[^\n.!?]{0,20}(?:진행|실행)")
+VALIDATION_RUN_PATTERN = re.compile(
+    r"\b(?:run|execute)\s+(?:tests?|checks?|verification|validation)\b|테스트\s*실행",
+    re.IGNORECASE,
+)
 COMPLETION_TERM_PATTERN = re.compile(
     r"\b(?:" + "|".join(re.escape(term) for term in ENGLISH_COMPLETION_TERMS) + r")\b",
     re.IGNORECASE,
 )
 DONE_PASSED_COMPLETION_PATTERN = re.compile(
     r"\b(?:rubricodex|task|work|implementation|pr|branch|changes?)\b[^\n.!?]{0,80}\b(?:done|passed)\b"
-    r"|\b(?:done|passed)\b[^\n.!?]{0,80}\b(?:rubricodex|task|work|implementation|pr|branch|changes?)\b"
-    r"|\ball\s+tests\s+passed\b",
+    r"|\b(?:done|passed)\b[^\n.!?]{0,80}\b(?:rubricodex|task|work|implementation|pr|branch|changes?)\b",
     re.IGNORECASE,
 )
 READY_COMPLETION_PATTERN = re.compile(
     r"\b(?:rubricodex|task|implementation|work|pr|branch|changes?)\b[^\n.!?]{0,80}\bready\b"
     r"|\bready\b\s+(?:for\s+(?:review|merge|release|pr)|to\s+(?:ship|merge|release|submit))\b",
     re.IGNORECASE,
+)
+KOREAN_COMPLETION_PATTERN = re.compile(
+    r"(?:Rubricodex|작업|구현|변경|PR)[^\n.!?]{0,40}(?:완료|준비|통과)"
+    r"|(?:완료|준비|통과)[^\n.!?]{0,40}(?:Rubricodex|작업|구현|변경|PR)",
+    re.IGNORECASE,
+)
+POLICY_PROMPT_MARKERS = (
+    "agents.md instructions",
+    "<instructions>",
+    "--- project-doc ---",
+    "## source of truth",
+    "## change rules",
+    "## ask first",
 )
 
 
@@ -92,6 +109,36 @@ def _is_implementation_handoff(text: str) -> bool:
     )
 
 
+def _has_explicit_run_id(text: str) -> bool:
+    return RUN_ID_PATTERN.search(text) is not None
+
+
+def _is_validation_run_prompt(text: str) -> bool:
+    return VALIDATION_RUN_PATTERN.search(text) is not None
+
+
+def _has_direct_rubricodex_line(text: str) -> bool:
+    return DIRECT_RUBRICODEX_LINE_PATTERN.search(text) is not None
+
+
+def _has_direct_rubricodex_handoff(text: str) -> bool:
+    for match in DIRECT_RUBRICODEX_LINE_PATTERN.finditer(text):
+        line = match.group(0)
+        if _is_validation_run_prompt(line) and not _is_implementation_handoff(line):
+            continue
+        if _is_implementation_handoff(line):
+            return True
+    return False
+
+
+def _is_explicit_handoff_prompt(text: str) -> bool:
+    if _has_direct_rubricodex_handoff(text):
+        return True
+    if _has_direct_rubricodex_line(text):
+        return False
+    return _has_explicit_run_id(text) and _is_implementation_handoff(text)
+
+
 def _has_done_or_passed_completion(text: str) -> bool:
     return DONE_PASSED_COMPLETION_PATTERN.search(text) is not None
 
@@ -101,8 +148,13 @@ def _is_completion_claim(text: str) -> bool:
         COMPLETION_TERM_PATTERN.search(text) is not None
         or _has_done_or_passed_completion(text)
         or READY_COMPLETION_PATTERN.search(text) is not None
-        or _contains_any(text, KOREAN_COMPLETION_TERMS)
+        or KOREAN_COMPLETION_PATTERN.search(text) is not None
     )
+
+
+def _is_policy_document_prompt(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in POLICY_PROMPT_MARKERS)
 
 
 def _additional_context(event_name: str, message: str) -> dict[str, Any]:
@@ -119,7 +171,7 @@ def _block(reason: str) -> dict[str, str]:
 
 
 def _run_id_from_prompt(prompt: str, root: Path) -> str | None:
-    match = re.search(r"--run-id(?:=|\s+)([A-Za-z0-9_.-]+)", prompt)
+    match = RUN_ID_PATTERN.search(prompt)
     if match:
         return match.group(1)
     taskpacks = artifact_root(root) / "taskpacks"
@@ -164,13 +216,13 @@ def _summarize_status(status: dict[str, Any]) -> str:
 
 
 def evaluate_intake_boundary(payload: dict[str, Any]) -> dict[str, Any]:
-    root = _cwd(payload)
     prompt = str(payload.get("prompt") or "")
     if not _is_rubricodex_prompt(prompt):
         return {}
     if _contains_any(prompt, RAW_STORAGE_TERMS) and _contains_any(prompt, STORE_TERMS):
-        return _block(
-            "Rubricodex must not store raw transcripts, raw task logs, or unredacted command output."
+        return _additional_context(
+            "UserPromptSubmit",
+            "Rubricodex guidance: raw_artifact_storage_request detected. Continue the run, store summarized evidence and references only, and let artifact validators reject forbidden raw artifacts.",
         )
     return _additional_context(
         "UserPromptSubmit",
@@ -183,12 +235,17 @@ def evaluate_matrix_readiness(payload: dict[str, Any]) -> dict[str, Any]:
     prompt = str(payload.get("prompt") or "")
     if not artifact_root(root).exists() or not _is_rubricodex_prompt(prompt):
         return {}
-    if not _is_implementation_handoff(prompt):
+    explicit_handoff = _is_explicit_handoff_prompt(prompt)
+    if _is_policy_document_prompt(prompt) and not explicit_handoff:
+        return {}
+    if _has_direct_rubricodex_line(prompt) and not explicit_handoff:
+        return {}
+    if not explicit_handoff and not _is_implementation_handoff(prompt):
         return {}
 
     run_id = _run_id_from_prompt(prompt, root)
     if run_id is None:
-        return _block("Rubricodex matrix readiness requires a taskpack run id and matrix lock before implementation.")
+        return {}
     required = [
         intent_path(root),
         matrix_path(root),

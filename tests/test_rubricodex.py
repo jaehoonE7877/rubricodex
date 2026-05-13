@@ -55,6 +55,7 @@ from rubricodex.artifacts import (
     run_probes,
     run_dir,
     run_manifest_path,
+    taskpack_dir,
     validate_brief,
     validate_evidence,
     validate_app_cards,
@@ -345,7 +346,7 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertEqual(result["status"], "fail")
                 self.assertIn("$.schema", {issue["path"] for issue in result["issues"]})
 
-    def test_hook_intake_blocks_raw_storage_prompt(self) -> None:
+    def test_hook_intake_advises_without_blocking_raw_storage_prompt(self) -> None:
         result = evaluate_gate(
             "intake-boundary",
             {
@@ -355,10 +356,38 @@ class RubricodexContractTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["decision"], "block")
-        self.assertIn("raw", result["reason"])
+        self.assertNotIn("decision", result)
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("raw_artifact_storage_request", context)
+        self.assertIn("summarized evidence", context)
+        self.assertNotIn("store the raw transcript", context)
 
-    def test_hook_matrix_readiness_blocks_implementation_without_lock(self) -> None:
+    def test_hook_intake_allows_first_rubricodex_prompt(self) -> None:
+        result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex 이 작업을 목표와 평가표로 정리해줘.",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertNotIn("decision", result)
+        self.assertIn("additionalContext", result["hookSpecificOutput"])
+
+    def test_hook_intake_allows_agents_policy_prompt(self) -> None:
+        result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertNotEqual(result.get("decision"), "block")
+
+    def test_hook_matrix_readiness_ignores_first_run_without_taskpack(self) -> None:
         init_project(self.root)
         write_json(intent_path(self.root), sample_brief())
         write_json(matrix_path(self.root), sample_matrix())
@@ -372,8 +401,7 @@ class RubricodexContractTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(result["decision"], "block")
-        self.assertIn("matrix lock", result["reason"])
+        self.assertEqual(result, {})
 
     def test_hook_matrix_readiness_ignores_untargeted_prompt_in_initialized_project(self) -> None:
         init_project(self.root)
@@ -393,6 +421,8 @@ class RubricodexContractTests(unittest.TestCase):
         init_project(self.root)
         write_json(intent_path(self.root), sample_brief())
         write_json(matrix_path(self.root), sample_matrix())
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
 
         for prompt in ("@Rubricodex run tests", "@Rubricodex execute tests", "@Rubricodex 테스트 실행"):
             with self.subTest(prompt=prompt):
@@ -407,12 +437,66 @@ class RubricodexContractTests(unittest.TestCase):
 
                 self.assertEqual(result, {})
 
-    def test_hook_matrix_readiness_blocks_clear_execute_handoff(self) -> None:
+    def test_hook_matrix_readiness_ignores_read_only_run_id_prompt(self) -> None:
+        init_project(self.root)
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "@Rubricodex show status --run-id missing-lock",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_ignores_policy_context_with_read_only_run_id_prompt(self) -> None:
+        init_project(self.root)
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
+        policy = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": policy + "\n\n@Rubricodex show status --run-id missing-lock",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_ignores_surrounding_implementation_context_with_read_only_command(self) -> None:
+        init_project(self.root)
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": "Before I implement this.\n@Rubricodex show status --run-id missing-lock",
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_blocks_clear_execute_handoff_with_taskpack_state(self) -> None:
         init_project(self.root)
         write_json(intent_path(self.root), sample_brief())
         write_json(matrix_path(self.root), sample_matrix())
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
 
-        for prompt in ("@Rubricodex execute the task now", "@Rubricodex 작업 진행해줘"):
+        for prompt in (
+            "@Rubricodex execute the task now --run-id missing-lock",
+            "@Rubricodex 작업 진행해줘 --run-id missing-lock",
+        ):
             with self.subTest(prompt=prompt):
                 result = evaluate_gate(
                     "matrix-readiness",
@@ -426,10 +510,54 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertEqual(result["decision"], "block")
                 self.assertIn("matrix lock", result["reason"])
 
+    def test_hook_matrix_readiness_allows_agents_policy_prompt_with_taskpack_state(self) -> None:
+        init_project(self.root)
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
+
+        result = evaluate_gate(
+            "matrix-readiness",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result, {})
+
+    def test_hook_matrix_readiness_blocks_mixed_policy_handoff_prompt(self) -> None:
+        init_project(self.root)
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), sample_matrix())
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
+        policy = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+        for command in (
+            "@Rubricodex implement the task now --run-id missing-lock",
+            "@Rubricodex execute the task now",
+            "@Rubricodex execute tests and implement the fix --run-id missing-lock",
+        ):
+            with self.subTest(command=command):
+                result = evaluate_gate(
+                    "matrix-readiness",
+                    {
+                        "hook_event_name": "UserPromptSubmit",
+                        "prompt": policy + "\n\n" + command,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result["decision"], "block")
+                self.assertIn("matrix lock", result["reason"])
+
     def test_hook_matrix_readiness_resolves_project_root_from_subdirectory(self) -> None:
         init_project(self.root)
         write_json(intent_path(self.root), sample_brief())
         write_json(matrix_path(self.root), sample_matrix())
+        taskpack_dir(self.root, "missing-lock").mkdir(parents=True)
+        (taskpack_dir(self.root, "missing-lock") / "goal.md").write_text("goal", encoding="utf-8")
         child = self.root / "src"
         child.mkdir()
 
@@ -437,7 +565,7 @@ class RubricodexContractTests(unittest.TestCase):
             "matrix-readiness",
             {
                 "hook_event_name": "UserPromptSubmit",
-                "prompt": "@Rubricodex implement the task now.",
+                "prompt": "@Rubricodex implement the task now --run-id missing-lock.",
                 "cwd": str(child),
             },
         )
@@ -514,14 +642,12 @@ class RubricodexContractTests(unittest.TestCase):
 
                 self.assertEqual(result, {})
 
-    def test_hook_completion_blocks_done_or_passed_claims(self) -> None:
+    def test_hook_completion_blocks_explicit_done_claims_with_missing_artifacts(self) -> None:
         init_project(self.root)
         run_dir(self.root, "example-v0.1").mkdir(parents=True)
 
         for message in (
             "Rubricodex is done.",
-            "All tests passed.",
-            "All tests passed. Next steps: open a PR.",
             "The task is done. Next, I will open a PR.",
         ):
             with self.subTest(message=message):
@@ -536,6 +662,27 @@ class RubricodexContractTests(unittest.TestCase):
 
                 self.assertEqual(result["decision"], "block")
                 self.assertIn("missing", result["reason"])
+
+    def test_hook_completion_ignores_generic_test_passed_phrase(self) -> None:
+        init_project(self.root)
+        run_dir(self.root, "example-v0.1").mkdir(parents=True)
+
+        for message in (
+            "All tests passed.",
+            "테스트 통과했습니다.",
+            "테스트는 통과했고 남은 artifacts를 수집하겠습니다.",
+        ):
+            with self.subTest(message=message):
+                result = evaluate_gate(
+                    "completion-claim",
+                    {
+                        "hook_event_name": "Stop",
+                        "last_assistant_message": message,
+                        "cwd": str(self.root),
+                    },
+                )
+
+                self.assertEqual(result, {})
 
     def test_brief_valid_passes(self) -> None:
         self.assertEqual(validate_brief(sample_brief()), [])
@@ -556,6 +703,15 @@ class RubricodexContractTests(unittest.TestCase):
         brief = sample_brief()
         brief["raw_transcript"] = "do not store this"
         self.assertTrue(validate_brief(brief))
+
+    def test_brief_raw_transcript_marker_fails_in_allowed_field(self) -> None:
+        for marker in ("RAW TRANSCRIPT: user said secret...", "- RAW TRANSCRIPT: user said secret..."):
+            with self.subTest(marker=marker):
+                brief = sample_brief()
+                brief["blocks"]["reference_context"] = marker
+                issues = validate_brief(brief)
+
+                self.assertIn("$.blocks.reference_context", {issue.path for issue in issues})
 
     def test_matrix_valid_passes(self) -> None:
         self.assertEqual(validate_matrix(sample_matrix()), [])
@@ -1145,6 +1301,37 @@ class RubricodexContractTests(unittest.TestCase):
         }
         self.assertTrue(validate_run_manifest(manifest))
 
+    def test_run_manifest_rejects_raw_output_markers_in_summary_fields(self) -> None:
+        for marker in (
+            "STDOUT: raw output",
+            "## STDOUT: raw output",
+            "RAW OUTPUT: raw",
+            "UNREDACTED OUTPUT: raw",
+            "RAW LOG: raw",
+            "RAW LOGS: raw",
+        ):
+            with self.subTest(marker=marker):
+                manifest = {
+                    "schema_version": SCHEMA_VERSION,
+                    "artifact_type": RUN_MANIFEST_TYPE,
+                    "rubricodex_version": "0.1.0",
+                    "created_at": "2026-05-11T00:00:00Z",
+                    "mode": "standard",
+                    "run_id": "example-v0.1",
+                    "executor": "codex-cli-local",
+                    "execution_mode": "dry_run",
+                    "raw_output_stored": False,
+                    "result_summary": "Prepared handoff.",
+                    "command_results": [
+                        {"command": "codex exec", "exit_code": None, "summary": marker},
+                    ],
+                    "changed_files": [],
+                    "verification_commands": [],
+                }
+                issues = validate_run_manifest(manifest)
+
+                self.assertIn("$.command_results[0].summary", {issue.path for issue in issues})
+
     def test_app_session_and_cards_validate_without_raw_transcript(self) -> None:
         session = sample_app_session()
         cards = sample_app_cards()
@@ -1681,6 +1868,29 @@ class RubricodexContractTests(unittest.TestCase):
         }
         self.assertTrue(validate_scorecard(scorecard))
 
+    def test_scorecard_rejects_raw_output_label_keys(self) -> None:
+        base = {
+            "schema_version": SCHEMA_VERSION,
+            "artifact_type": SCORECARD_TYPE,
+            "rubricodex_version": "0.1.0",
+            "mode": "standard",
+            "run_id": "example-v0.1",
+            "created_at": "2026-05-11T00:00:00Z",
+            "scoring_model": "counts-v0.1",
+            "decision": "pass",
+            "counts": {"pass": 1, "partial": 0, "missing_evidence": 0, "fail": 0},
+            "results": [],
+        }
+
+        for key in ("stdout", "stderr", "Raw Transcript", "Raw Log", "raw-output"):
+            with self.subTest(key=key):
+                scorecard = dict(base)
+                scorecard[key] = "do not store this"
+
+                issues = validate_scorecard(scorecard)
+
+                self.assertIn(f"$.{key}", {issue.path for issue in issues})
+
     def test_report_writes_required_headings(self) -> None:
         matrix = self.write_default_contract()
         write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
@@ -1704,6 +1914,36 @@ class RubricodexContractTests(unittest.TestCase):
         text = paths["report"].read_text(encoding="utf-8")
         self.assertIn("Hard gate alert: C-01 Endpoint contract is fail", text)
         self.assertIn("Hard gate blocked", text)
+
+    def test_report_writer_rejects_raw_output_fields_in_scorecard(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        scorecard["raw_command_output"] = "do not store this"
+        write_json(run_dir(self.root, "example-v0.1") / "scorecard.json", scorecard)
+
+        with self.assertRaises(ArtifactError):
+            write_report(self.root, "example-v0.1")
+
+    def test_report_writer_rejects_raw_output_label_keys_in_scorecard(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        scorecard["stdout"] = "do not store this"
+        write_json(run_dir(self.root, "example-v0.1") / "scorecard.json", scorecard)
+
+        with self.assertRaises(ArtifactError):
+            write_report(self.root, "example-v0.1")
+
+    def test_report_writer_rejects_raw_output_markers_in_scorecard(self) -> None:
+        matrix = self.write_default_contract()
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix))
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        scorecard["results"][0]["reason"] = "RAW COMMAND OUTPUT: secret shell output"
+        write_json(run_dir(self.root, "example-v0.1") / "scorecard.json", scorecard)
+
+        with self.assertRaises(ArtifactError):
+            write_report(self.root, "example-v0.1")
 
     def test_report_includes_probe_skip_reasons(self) -> None:
         matrix = self.write_default_contract()
