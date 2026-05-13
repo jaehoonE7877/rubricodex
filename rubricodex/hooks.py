@@ -72,7 +72,7 @@ NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
     r"(?:please\s+)?(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|"
     r"can\s+not|cannot|can't|may\s+not|never|not|not\s+to\s+be|not\s+to|"
     r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|prohibited\s+from\s+being|without|"
-    r"forbid(?:s|ding)?|prohibit(?:s|ed|ing)?|ban(?:s|ned|ning)?)"
+    r"forbid(?:s|ding)?|prohibit(?:s|ed|ing)?|ban(?:s|ned|ning)?|from\s+being)"
     r"(?:\s+ever)?(?:\s+be)?\s+$",
     re.IGNORECASE,
 )
@@ -226,6 +226,10 @@ UNSAFE_ARTIFACT_DESTINATION_PATTERN = re.compile(
     r"\bevidence(?:\.json)?\b|\breport(?:\.md)?\b|\brepo(?:sitory)?\b|\.rubricodex|\.json|\.md",
     re.IGNORECASE,
 )
+LOOSE_ARTIFACT_DESTINATION_PATTERN = re.compile(
+    r"evidence(?:\.json)?|report(?:\.md)?|repo(?:sitory)?|\.rubricodex|\.json|\.md",
+    re.IGNORECASE,
+)
 DERIVED_TRANSFORM_VERB_PATTERN = re.compile(
     r"\b(?:extract|derive|summari[sz]e|redact|saniti[sz]e|analy[sz]e|review)\b|요약",
     re.IGNORECASE,
@@ -248,6 +252,7 @@ FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
 KOREAN_FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
     r"(?:아래|다음|이|해당)\s*(?:내용|텍스트|입력|전문|출력)|(?:내용|텍스트|입력|전문|출력)\s*(?:아래|다음)|아래"
 )
+KOREAN_REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"(?:그걸|그것|그거|이를|이걸|이것|해당|원문)")
 
 
 def _cwd(payload: dict[str, Any]) -> Path:
@@ -645,6 +650,7 @@ def _cross_clause_english_storage_match(
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
         prefix = clause[: english_match.start()]
+        has_prefix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(prefix) is not None
         safe_derived_pronoun_action = (
             (
                 _has_safe_derived_output_before(prefix)
@@ -655,7 +661,7 @@ def _cross_clause_english_storage_match(
         )
         if safe_derived_pronoun_action:
             continue
-        if require_raw_reference and not has_raw_reference:
+        if require_raw_reference and not has_raw_reference and not has_prefix_raw_reference:
             continue
         if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
             continue
@@ -663,7 +669,7 @@ def _cross_clause_english_storage_match(
             continue
         if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
             continue
-        if not has_raw_reference and not has_destination_prefix:
+        if not has_raw_reference and not has_destination_prefix and not has_prefix_raw_reference:
             continue
         return {
             "matched_categories": ",".join(previous_categories),
@@ -794,7 +800,17 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
                 "matched_action": pending_forward_storage["matched_action"],
             }
 
-        korean_match = _korean_storage_match(clause, categories or previous_categories)
+        korean_context_categories = categories or previous_categories
+        if (
+            not korean_context_categories
+            and previous_negated_categories
+            and (
+                KOREAN_REFERENCE_RAW_OBJECT_PATTERN.search(clause) is not None
+                or LOOSE_ARTIFACT_DESTINATION_PATTERN.search(clause) is not None
+            )
+        ):
+            korean_context_categories = previous_negated_categories
+        korean_match = _korean_storage_match(clause, korean_context_categories)
         if korean_match is not None:
             return korean_match
 
