@@ -512,6 +512,16 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
                 "store",
             ),
+            (
+                "@Rubricodex Here is the raw transcript. Store in the repo.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex Here is the raw transcript. It should be stored in the repo.",
+                "raw_transcript",
+                "store",
+            ),
         ]
 
         for prompt, category, action in cases:
@@ -536,6 +546,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex store summarized evidence, not raw transcripts.",
             "@Rubricodex write docs that say do not store raw transcripts.",
             "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",
+            "@Rubricodex raw transcript should not be stored in the repo.",
+            "@Rubricodex summarize the raw transcript and store the summary in evidence.json.",
+            "@Rubricodex redact raw command output and save the redacted summary in evidence.json.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
 

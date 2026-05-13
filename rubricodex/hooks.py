@@ -62,7 +62,8 @@ READY_COMPLETION_PATTERN = re.compile(
 PROMPT_CLAUSE_PATTERN = re.compile(r"[\n\r]+|(?<=[.!?])\s+|[;；]")
 ENGLISH_STORAGE_ACTION_PATTERN = re.compile(r"\b(" + ENGLISH_STORAGE_ACTION_PATTERN_TEXT + r")\b", re.IGNORECASE)
 NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
-    r"(?:do\s+not|don't|must\s+not|should\s+not|never|not|not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
+    r"(?:do\s+not|don't|must\s+not(?:\s+be)?|should\s+not(?:\s+be)?|never(?:\s+be)?|not(?:\s+be)?|"
+    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to)\s+$",
     re.IGNORECASE,
 )
 NEGATED_STORAGE_BEFORE_RAW_PATTERN = re.compile(
@@ -189,6 +190,9 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
     for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
         if _is_negated_english_action(clause, english_match.start()):
             continue
+        suffix = clause[english_match.end() : english_match.end() + 120]
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not _active_raw_categories(suffix):
+            continue
         window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
         window_categories = _active_raw_categories(window)
         if window_categories:
@@ -208,10 +212,12 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
         suffix = clause[english_match.end() : english_match.end() + 120]
         if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None:
             continue
-        if REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None:
+        action = _canonical_english_storage_action(english_match.group(1))
+        reference_window = clause[max(0, english_match.start() - 80) : english_match.end() + 120]
+        if action != "write" or REFERENCE_RAW_OBJECT_PATTERN.search(reference_window) is not None:
             return {
                 "matched_categories": ",".join(previous_categories),
-                "matched_action": _canonical_english_storage_action(english_match.group(1)),
+                "matched_action": action,
             }
     return None
 
