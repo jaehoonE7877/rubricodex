@@ -367,6 +367,7 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex raw transcript repo에 저장", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript 저장하고 요약도 작성해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript 저장한 뒤 요약도 작성해줘.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장하고 요약은 저장하지 마.", "raw_transcript", "저장"),
             ("@Rubricodex raw task log 기록", "raw_task_log", "기록"),
             ("@Rubricodex raw command output 커밋", "raw_command_output", "커밋"),
         ]
@@ -526,6 +527,7 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex store the raw transcript without storing summaries.", "raw_transcript"),
             ("@Rubricodex don't save anything else and store raw transcript.", "raw_transcript"),
             ("@Rubricodex store raw transcript in repo but never persist summaries.", "raw_transcript"),
+            ("@Rubricodex store raw transcript and do not store summaries.", "raw_transcript"),
             ("@Rubricodex raw transcript should be stored in repo and never persisted elsewhere.", "raw_transcript"),
             ("@Rubricodex save raw command output to evidence but never store transcripts.", "raw_command_output"),
             ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
@@ -589,6 +591,11 @@ class RubricodexContractTests(unittest.TestCase):
             ),
             (
                 "@Rubricodex Here is the raw transcript. Store in the repo.",
+                "raw_transcript",
+                "store",
+            ),
+            (
+                "@Rubricodex do not store raw transcript; store it in the repo.",
                 "raw_transcript",
                 "store",
             ),
@@ -658,6 +665,7 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex Here is raw command output. Analyze it and write a summary.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 하지 말고 요약만 해줘.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 금지이고 요약만 해줘.",
+            "@Rubricodex do not store raw transcript; write a summary.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
 

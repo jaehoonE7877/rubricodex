@@ -91,8 +91,12 @@ ENGLISH_NEGATION_BOUNDARY_PATTERN = re.compile(
     + r"\b",
     re.IGNORECASE,
 )
+ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN = re.compile(
+    r"(?:,|\band\b|\bthen\b|\bbut\b|\bhowever\b|\bexcept\b|\binstead\b)",
+    re.IGNORECASE,
+)
 KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
-    r"^[^.!?;；,\n\r]{0,80}(?:저장|커밋|기록)\s*(?:하지|하지\s+않|하지\s+마|금지|허용하지)"
+    r"(?:저장|커밋|기록)\s*(?:하지|하지\s+않|하지\s+마|금지|허용하지)"
 )
 KOREAN_NEGATED_STORAGE_ACTION_PATTERN = re.compile(
     r"^(?:저장|커밋|기록)\s*(?:하지|하지\s+않|하지\s+마|금지|허용하지)"
@@ -261,12 +265,22 @@ def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
 
 def _is_negated_korean_raw_reference(text: str, raw_end: int) -> bool:
     suffix = text[raw_end : raw_end + 120]
-    return KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix) is not None
+    match = KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN.search(suffix)
+    if match is None:
+        return False
+    return not _has_affirmative_korean_storage_action(suffix[: match.start()])
 
 
 def _is_negated_korean_action(text: str, action_start: int) -> bool:
     suffix = text[action_start : action_start + 80]
     return KOREAN_NEGATED_STORAGE_ACTION_PATTERN.search(suffix) is not None
+
+
+def _has_affirmative_korean_storage_action(text: str) -> bool:
+    for storage_match in KOREAN_RAW_STORAGE_REQUEST_PATTERN.finditer(text):
+        if not _is_negated_korean_action(text, storage_match.start("action")):
+            return True
+    return False
 
 
 def _is_negated_english_raw_reference_after(text: str, raw_end: int) -> bool:
@@ -276,6 +290,8 @@ def _is_negated_english_raw_reference_after(text: str, raw_end: int) -> bool:
         return False
     before_negation = suffix[: match.start()]
     if ENGLISH_NEGATION_BOUNDARY_PATTERN.search(before_negation) is not None:
+        return False
+    if ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN.search(before_negation) is not None:
         return False
     return not _has_affirmative_storage_action(before_negation)
 
@@ -364,7 +380,12 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
     return None
 
 
-def _cross_clause_english_storage_match(clause: str, previous_categories: list[str]) -> dict[str, str] | None:
+def _cross_clause_english_storage_match(
+    clause: str,
+    previous_categories: list[str],
+    *,
+    require_raw_reference: bool = False,
+) -> dict[str, str] | None:
     if not previous_categories:
         return None
     for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
@@ -373,6 +394,8 @@ def _cross_clause_english_storage_match(clause: str, previous_categories: list[s
         suffix = clause[english_match.end() : english_match.end() + 120]
         action = _canonical_english_storage_action(english_match.group(1))
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+        if require_raw_reference and not has_raw_reference:
+            continue
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
         if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
             continue
@@ -417,6 +440,7 @@ def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] 
 
 def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
     previous_categories: list[str] = []
+    previous_negated_categories: list[str] = []
     pending_forward_storage: dict[str, str] | None = None
     for clause in PROMPT_CLAUSE_PATTERN.split(prompt):
         clause = clause.strip()
@@ -427,6 +451,7 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if same_clause_match is not None:
             return same_clause_match
 
+        raw_categories = _unique_categories(_raw_category_matches(clause))
         categories = _active_raw_categories(clause)
         if categories and pending_forward_storage is not None:
             return {
@@ -442,6 +467,14 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if cross_clause_match is not None:
             return cross_clause_match
 
+        negated_cross_clause_match = _cross_clause_english_storage_match(
+            clause,
+            previous_negated_categories,
+            require_raw_reference=True,
+        )
+        if negated_cross_clause_match is not None:
+            return negated_cross_clause_match
+
         forward_storage_match = _forward_english_storage_match(clause)
         if forward_storage_match is not None:
             pending_forward_storage = forward_storage_match
@@ -449,8 +482,12 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
 
         if categories:
             previous_categories = categories
+            previous_negated_categories = []
+        elif raw_categories:
+            previous_negated_categories = raw_categories
         elif SAFE_SUMMARY_OBJECT_PATTERN.search(clause) is not None:
             previous_categories = []
+            previous_negated_categories = []
             pending_forward_storage = None
     return None
 
