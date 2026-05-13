@@ -104,7 +104,8 @@ ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁)?\s*(?:$|[.!?。])",
+    + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|할\s*것)?"
+    r"\s*(?:$|[.!?。]|\s)",
 )
 REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
 SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
@@ -244,14 +245,17 @@ def _is_safe_summary_storage_suffix(suffix: str) -> bool:
     raw_matches = _active_raw_category_matches(suffix)
     if not raw_matches:
         return True
-    first_raw_start = min(int(match["start"]) for match in raw_matches)
-    if int(summary_match.start()) >= first_raw_start:
-        return False
-    connector = suffix[summary_match.end() : first_raw_start]
-    return (
-        SUMMARY_SOURCE_CONNECTOR_PATTERN.search(connector) is not None
-        and RAW_INCLUSION_CONNECTOR_PATTERN.search(connector) is None
-    )
+    for raw_match in raw_matches:
+        raw_start = int(raw_match["start"])
+        if int(summary_match.start()) >= raw_start:
+            return False
+        connector = suffix[summary_match.end() : raw_start]
+        if (
+            SUMMARY_SOURCE_CONNECTOR_PATTERN.search(connector) is None
+            or RAW_INCLUSION_CONNECTOR_PATTERN.search(connector) is not None
+        ):
+            return False
+    return True
 
 
 def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:

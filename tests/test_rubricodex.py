@@ -365,6 +365,8 @@ class RubricodexContractTests(unittest.TestCase):
         cases = [
             ("@Rubricodex raw transcript를 repo에 저장해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript repo에 저장", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장하고 요약도 작성해줘.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장한 뒤 요약도 작성해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw task log 기록", "raw_task_log", "기록"),
             ("@Rubricodex raw command output 커밋", "raw_command_output", "커밋"),
         ]
@@ -496,6 +498,10 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex don't save anything else and store raw transcript.", "raw_transcript"),
             ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
             ("@Rubricodex save a redacted summary plus raw command output.", "raw_command_output"),
+            (
+                "@Rubricodex store a summary of raw transcript alongside raw command output.",
+                "raw_transcript,raw_command_output",
+            ),
         ]
 
         for prompt, category in cases:
