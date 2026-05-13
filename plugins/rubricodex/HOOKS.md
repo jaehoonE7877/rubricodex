@@ -1,6 +1,6 @@
 # Rubricodex Lifecycle Hooks
 
-Last verified: 2026-05-12
+Last verified: 2026-05-13
 
 ## Official support result
 
@@ -23,18 +23,22 @@ The bundled hook config is safe for plugin-only installs:
 1. `rubricodex_intake_boundary_gate`
    - Event: `UserPromptSubmit`
    - CLI gate: `rubricodex hook gate intake-boundary`
-   - Blocks requests that ask Rubricodex to store raw transcripts, task logs, or unredacted command output.
+   - Blocks explicit requests that ask Rubricodex to store raw transcripts, task logs, or unredacted command output.
+   - Allows policy, docs, AGENTS, and negative wording such as `do not store raw transcripts`.
+   - Block reasons include the gate name, matched raw artifact categories, and matched action without echoing prompt text.
    - Adds intake guidance for Rubricodex prompts.
 
 2. `rubricodex_matrix_readiness_gate`
    - Event: `UserPromptSubmit`
    - CLI gate: `rubricodex hook gate matrix-readiness`
    - Blocks implementation handoff language when required intent, matrix, goal, prompt lint, or matrix lock artifacts are missing or stale.
+   - Block reasons are prefixed with `Rubricodex matrix-readiness blocked`.
 
 3. `rubricodex_completion_claim_gate`
    - Event: `Stop`
    - CLI gate: `rubricodex hook gate completion-claim`
    - Continues the turn when a completion claim is made but run artifacts are missing, invalid, or incomplete.
+   - Block reasons are prefixed with `Rubricodex completion-claim blocked`.
 
 ## Operator setup
 
