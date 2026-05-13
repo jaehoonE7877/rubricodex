@@ -106,11 +106,13 @@ ENGLISH_TRAILING_CAVEAT_PATTERN = re.compile(
 )
 KOREAN_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     r"(?:저장|커밋|기록)(?:을|를|도|이|가|은|는)?\s*"
-    r"(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지|안\s*하|막|방지)"
+    r"(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지|안\s*하|안\s*되|"
+    r"필요\s*없|필요하지\s+않|되지\s+않|막|방지)"
 )
 KOREAN_NEGATED_STORAGE_ACTION_PATTERN = re.compile(
     r"^(?:저장|커밋|기록)(?:을|를|도|이|가|은|는)?\s*"
-    r"(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지|안\s*하|막|방지)"
+    r"(?:하지|하지\s+않|하지\s+마|말고|없이|금지|허용하지|안\s*하|안\s*되|"
+    r"필요\s*없|필요하지\s+않|되지\s+않|막|방지)"
 )
 ENGLISH_NEGATED_STORAGE_AFTER_RAW_PATTERN = re.compile(
     r"(?:(?:must|should|may|can)\s+not|mustn't|shouldn't|can't|cannot|do\s+not|don't|never|"
@@ -944,7 +946,10 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             return negated_cross_clause_match
 
         safe_output_clause = _is_safe_output_clause(clause)
-        if not (categories and safe_output_clause):
+        skip_forward_storage = safe_output_clause and (
+            categories or _has_safe_summary_transform_before(clause) or _has_safe_derived_output_before(clause)
+        )
+        if not skip_forward_storage:
             forward_storage_match = _forward_english_storage_match(clause)
             if forward_storage_match is None:
                 forward_storage_match = _forward_korean_storage_match(clause)
