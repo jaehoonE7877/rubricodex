@@ -71,7 +71,8 @@ ENGLISH_RAW_REFERENCE_ACTION_PATTERN_TEXT = (
 NEGATED_ENGLISH_ACTION_PREFIX_PATTERN = re.compile(
     r"(?:please\s+)?(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|"
     r"can\s+not|cannot|can't|may\s+not|never|not|not\s+to\s+be|not\s+to|"
-    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|prohibited\s+from\s+being|without)"
+    r"not\s+allowed\s+to|forbidden\s+to|prohibited\s+to|prohibited\s+from\s+being|without|"
+    r"forbid(?:s|ding)?|prohibit(?:s|ed|ing)?|ban(?:s|ned|ning)?)"
     r"(?:\s+ever)?(?:\s+be)?\s+$",
     re.IGNORECASE,
 )
@@ -200,6 +201,25 @@ POLICY_PROHIBITION_CONTEXT_PATTERN = re.compile(
 POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN = re.compile(
     r"\b(?:and|also|then)\b[^.!?;；]{0,80}"
     r"(?:\bevidence(?:\.json)?\b|\breport(?:\.md)?\b|\brepo(?:sitory)?\b|\.rubricodex|\.json|\.md)",
+    re.IGNORECASE,
+)
+POLICY_PROHIBITION_BEFORE_RAW_PATTERN = re.compile(
+    r"(?:"
+    r"(?:do\s+not|don't|must\s+not|mustn't|should\s+not|shouldn't|never)\s+"
+    r"(?:ever\s+)?(?:store|save|commit|write|persist|record|include|add)\s+(?:the\s+)?"
+    r"|(?:forbid(?:s|ding)?|prohibit(?:s|ed|ing)?|disallow(?:s|ed|ing)?|ban(?:s|ned|ning)?)\s+"
+    r"(?:storing\s+|storage\s+of\s+)?(?:the\s+)?"
+    r")$",
+    re.IGNORECASE,
+)
+POLICY_PROHIBITION_AFTER_RAW_PATTERN = re.compile(
+    r"^s?(?:"
+    r"\s+(?:is|are|be)\s+(?:not\s+allowed|forbidden|prohibited|disallowed)"
+    r"|\s+(?:must|should|may|can)\s+not\b"
+    r"|\s+(?:mustn't|shouldn't|can't|cannot)\b"
+    r"|[^.!?;；]{0,60}\bas\s+(?:disallowed|forbidden|prohibited)\b"
+    r"|[^.!?;；]{0,60}\bdo-not-store\b"
+    r")",
     re.IGNORECASE,
 )
 UNSAFE_ARTIFACT_DESTINATION_PATTERN = re.compile(
@@ -499,11 +519,24 @@ def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
         policy_start = min(first_policy_markers)
         if UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix[:policy_start]) is not None:
             return False
+    raw_matches = _raw_category_matches(suffix)
     return (
         action in {"include", "add", "write"}
         and POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
-        and POLICY_PROHIBITION_CONTEXT_PATTERN.search(suffix) is not None
+        and raw_matches
+        and any(_has_policy_prohibition_context_for_raw(suffix, match) for match in raw_matches)
         and POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN.search(suffix) is None
+    )
+
+
+def _has_policy_prohibition_context_for_raw(suffix: str, raw_match: dict[str, Any]) -> bool:
+    raw_start = int(raw_match["start"])
+    raw_end = int(raw_match["end"])
+    before = suffix[max(0, raw_start - 100) : raw_start]
+    after = suffix[raw_end : raw_end + 100]
+    return (
+        POLICY_PROHIBITION_BEFORE_RAW_PATTERN.search(before) is not None
+        or POLICY_PROHIBITION_AFTER_RAW_PATTERN.search(after) is not None
     )
 
 
@@ -671,6 +704,8 @@ def _forward_english_storage_match(clause: str) -> dict[str, str] | None:
         suffix = clause[english_match.end() : english_match.end() + 160]
         action = _canonical_english_storage_action(english_match.group(1))
         if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
+            continue
+        if _is_policy_doc_reference_action(action, suffix):
             continue
         if SUMMARY_ONLY_FORWARD_OBJECT_PATTERN.search(suffix) is not None:
             continue
