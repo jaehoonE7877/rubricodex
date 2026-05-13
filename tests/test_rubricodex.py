@@ -602,6 +602,11 @@ class RubricodexContractTests(unittest.TestCase):
                 "save",
             ),
             (
+                "@Rubricodex 아래 내용을 저장해줘. raw transcript: hello",
+                "raw_transcript",
+                "저장",
+            ),
+            (
                 "@Rubricodex Here is the raw transcript. Store it in the repo.",
                 "raw_transcript",
                 "store",
@@ -694,6 +699,8 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex do not store raw transcripts or raw command output.",
             "@Rubricodex store summarized evidence, not raw transcripts.",
             "@Rubricodex write docs that say do not store raw transcripts.",
+            "@Rubricodex write a policy listing raw transcripts as disallowed.",
+            "@Rubricodex write docs listing raw command output as forbidden.",
             "@Rubricodex include raw transcripts in the policy as disallowed items.",
             "@Rubricodex add raw transcript to the do-not-store policy.",
             "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",

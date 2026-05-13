@@ -206,6 +206,9 @@ FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
     r"this|that|below|above)\b",
     re.IGNORECASE,
 )
+KOREAN_FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
+    r"(?:아래|다음|이|해당)\s*(?:내용|텍스트|입력|전문|출력)|(?:내용|텍스트|입력|전문|출력)\s*(?:아래|다음)|아래"
+)
 
 
 def _cwd(payload: dict[str, Any]) -> Path:
@@ -454,7 +457,7 @@ def _has_safe_analysis_reference_before(text: str) -> bool:
 
 def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
     return (
-        action in {"include", "add"}
+        action in {"include", "add", "write"}
         and POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
         and POLICY_PROHIBITION_CONTEXT_PATTERN.search(suffix) is not None
         and POLICY_EXCEPTION_UNSAFE_DESTINATION_PATTERN.search(suffix) is None
@@ -607,6 +610,20 @@ def _forward_english_storage_match(clause: str) -> dict[str, str] | None:
     return None
 
 
+def _forward_korean_storage_match(clause: str) -> dict[str, str] | None:
+    for korean_match in KOREAN_RAW_STORAGE_REQUEST_PATTERN.finditer(clause):
+        action_start = korean_match.start("action")
+        if _is_negated_korean_action(clause, action_start) or _is_safe_korean_summary_action(clause, action_start):
+            continue
+        window = clause[max(0, action_start - 80) : korean_match.end() + 80]
+        if KOREAN_FORWARD_STORAGE_OBJECT_PATTERN.search(window) is None:
+            continue
+        return {
+            "matched_action": korean_match.group("action"),
+        }
+    return None
+
+
 def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] | None:
     if not categories:
         return None
@@ -664,6 +681,8 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             return negated_cross_clause_match
 
         forward_storage_match = _forward_english_storage_match(clause)
+        if forward_storage_match is None:
+            forward_storage_match = _forward_korean_storage_match(clause)
         if forward_storage_match is not None:
             pending_forward_storage = forward_storage_match
             continue
