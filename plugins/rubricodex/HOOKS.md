@@ -1,6 +1,6 @@
 # Rubricodex Lifecycle Hooks
 
-Last verified: 2026-05-13
+Last verified: 2026-05-12
 
 ## Official support result
 
@@ -23,23 +23,18 @@ The bundled hook config is safe for plugin-only installs:
 1. `rubricodex_intake_boundary_gate`
    - Event: `UserPromptSubmit`
    - CLI gate: `rubricodex hook gate intake-boundary`
-   - Does not hard block prompts. It always keeps the Rubricodex first-run path open.
-   - Adds advisory `additionalContext` for Rubricodex prompts.
-   - When raw transcript, task log, or unredacted command output storage risk is detected, guidance includes the gate name, matched raw artifact categories, and matched action without echoing prompt text.
-   - Raw storage enforcement lives in artifact schemas, validators, and report writer paths instead of the `UserPromptSubmit` hook.
-   - Validators reject forbidden raw fields and raw payload markers in summary/result fields.
+   - Blocks requests that ask Rubricodex to store raw transcripts, task logs, or unredacted command output.
+   - Adds intake guidance for Rubricodex prompts.
 
 2. `rubricodex_matrix_readiness_gate`
    - Event: `UserPromptSubmit`
    - CLI gate: `rubricodex hook gate matrix-readiness`
    - Blocks implementation handoff language when required intent, matrix, goal, prompt lint, or matrix lock artifacts are missing or stale.
-   - Block reasons are prefixed with `Rubricodex matrix-readiness blocked`.
 
 3. `rubricodex_completion_claim_gate`
    - Event: `Stop`
    - CLI gate: `rubricodex hook gate completion-claim`
    - Continues the turn when a completion claim is made but run artifacts are missing, invalid, or incomplete.
-   - Block reasons are prefixed with `Rubricodex completion-claim blocked`.
 
 ## Operator setup
 
@@ -50,7 +45,7 @@ Hooks require Codex hook support to be enabled by the user or environment:
 codex_hooks = true
 ```
 
-For advisory guidance plus matrix/completion gates in a repo, install the CLI locally:
+For full gate enforcement in a repo, install the CLI locally:
 
 ```bash
 python3 -m pip install -e .

@@ -1,6 +1,6 @@
 {
   "artifact_type": "rubricodex.goal_lock",
-  "brief_sha256": "5e4ee8560148b87ee884d17d03d9878d3c471b77673ed8c7fa4263ae528e0b02",
+  "brief_sha256": "001e6401cef809009ff83edef0ad53a8703d75dc6d122b25c6a25f308a8735ef",
   "created_at": "2026-05-12T06:54:57Z",
   "executor": "codex-cli-goal",
   "goal_sha256": "4b525c43c6fc8022a1e812249358bdcd508e38513c4924277922d2a4d30e14bc",
@@ -61,13 +61,13 @@
       "external services"
     ]
   },
-  "matrix_sha256": "115fa0e4135ed088e01f5c72c77263003f6e488a083db151928f8527ba409797",
+  "matrix_sha256": "166a48800cf49f8923fc9066c9e046c0cf1538ead242ce22d3b34272e9f4e09f",
   "mode": "standard",
   "revision": {
     "approved_at": "2026-05-12T06:54:57Z",
-    "reason": "v1.0.3 package version refresh; no artifact contract shape change."
+    "reason": "v1.0.2 package version refresh; no artifact contract shape change."
   },
-  "rubricodex_version": "1.0.3",
+  "rubricodex_version": "1.0.2",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1"
 }

@@ -144,16 +144,8 @@ FORBIDDEN_KEYS = {
     "raw_task_log",
     "raw_codex_log",
     "raw_command_output",
-    "raw_output",
-    "stderr",
-    "stdout",
     "unredacted_command_output",
-    "output",
 }
-RAW_PAYLOAD_MARKER_PATTERN = re.compile(
-    r"(?im)^\s*(?:raw\s+(?:chat\s+)?transcripts?|raw\s+(?:task|codex)\s+logs?|"
-    r"raw\s+command\s+outputs?|unredacted\s+command\s+outputs?|stdout|stderr)\s*[:：]"
-)
 
 GOAL_HEADINGS = (
     "Purpose",
@@ -770,25 +762,6 @@ def validate_forbidden_keys(value: Any, path: str = "$") -> list[ValidationIssue
     return issues
 
 
-def validate_raw_payload_markers(value: Any, path: str = "$") -> list[ValidationIssue]:
-    issues: list[ValidationIssue] = []
-    if isinstance(value, str):
-        if RAW_PAYLOAD_MARKER_PATTERN.search(value) is not None:
-            issues.append(
-                ValidationIssue(
-                    path,
-                    "raw transcript/log/output payload markers are not allowed; store summarized evidence only",
-                )
-            )
-    elif isinstance(value, dict):
-        for key, child in value.items():
-            issues.extend(validate_raw_payload_markers(child, f"{path}.{key}"))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            issues.extend(validate_raw_payload_markers(child, f"{path}[{index}]"))
-    return issues
-
-
 def _is_non_empty(value: Any) -> bool:
     if isinstance(value, str):
         return bool(value.strip())
@@ -898,12 +871,6 @@ def validate_evidence(data: dict[str, Any], matrix: dict[str, Any]) -> list[Vali
         issues.append(ValidationIssue("$.artifact_type", f"artifact_type must be {EVIDENCE_TYPE}"))
     if data.get("raw_output_stored") is not False:
         issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
-    runner_summary = data.get("runner_summary")
-    if runner_summary is not None:
-        if not isinstance(runner_summary, str):
-            issues.append(ValidationIssue("$.runner_summary", "runner_summary must be a string when present"))
-        else:
-            issues.extend(validate_raw_payload_markers(runner_summary, "$.runner_summary"))
 
     known_ids = {criterion["id"] for criterion in matrix.get("criteria", []) if isinstance(criterion, dict) and "id" in criterion}
     items = data.get("evidence_items")
@@ -920,8 +887,6 @@ def validate_evidence(data: dict[str, Any], matrix: dict[str, Any]) -> list[Vali
             issues.append(ValidationIssue(f"{path}.criterion_id", f"unknown criterion id {criterion_id!r}"))
         if not isinstance(item.get("summary"), str) or not item["summary"].strip():
             issues.append(ValidationIssue(f"{path}.summary", "summary is required"))
-        else:
-            issues.extend(validate_raw_payload_markers(item["summary"], f"{path}.summary"))
         if item.get("status", "pass") not in STATUS_ORDER:
             issues.append(ValidationIssue(f"{path}.status", "status must be pass, partial, missing_evidence, or fail"))
         if item.get("artifact_refs") is not None and not isinstance(item["artifact_refs"], list):
@@ -938,35 +903,6 @@ def validate_scorecard(data: dict[str, Any]) -> list[ValidationIssue]:
     for key in ("total_score", "threshold"):
         if key in data:
             issues.append(ValidationIssue(f"$.{key}", f"{key} is not allowed in v0.1 scorecards"))
-    results = data.get("results")
-    if not isinstance(results, list):
-        issues.append(ValidationIssue("$.results", "results must be a list"))
-        return issues
-
-    for index, result in enumerate(results):
-        if not isinstance(result, dict):
-            issues.append(ValidationIssue(f"$.results[{index}]", "scorecard result must be an object"))
-            continue
-        path = f"$.results[{index}]"
-        if isinstance(result.get("reason"), str):
-            issues.extend(validate_raw_payload_markers(result["reason"], f"{path}.reason"))
-        if "evidence_summaries" not in result:
-            continue
-        summaries = result["evidence_summaries"]
-        if not isinstance(summaries, list):
-            issues.append(ValidationIssue(f"{path}.evidence_summaries", "evidence_summaries must be a list when present"))
-            issues.extend(validate_raw_payload_markers(summaries, f"{path}.evidence_summaries"))
-            continue
-        for summary_index, summary in enumerate(summaries):
-            if not isinstance(summary, str):
-                issues.append(
-                    ValidationIssue(
-                        f"{path}.evidence_summaries[{summary_index}]",
-                        "evidence summary must be a string",
-                    )
-                )
-                continue
-            issues.extend(validate_raw_payload_markers(summary, f"{path}.evidence_summaries[{summary_index}]"))
     return issues
 
 
@@ -982,8 +918,6 @@ def validate_run_manifest(data: dict[str, Any]) -> list[ValidationIssue]:
         issues.append(ValidationIssue("$.raw_output_stored", "raw_output_stored must be false"))
     if not isinstance(data.get("result_summary"), str) or not data["result_summary"].strip():
         issues.append(ValidationIssue("$.result_summary", "result_summary is required"))
-    else:
-        issues.extend(validate_raw_payload_markers(data["result_summary"], "$.result_summary"))
 
     for key in ("changed_files", "verification_commands", "command_results"):
         if not isinstance(data.get(key), list):
@@ -1005,8 +939,6 @@ def validate_run_manifest(data: dict[str, Any]) -> list[ValidationIssue]:
             issues.append(ValidationIssue(f"{path}.exit_code", "exit_code must be an integer or null"))
         if not isinstance(result.get("summary"), str) or not result["summary"].strip():
             issues.append(ValidationIssue(f"{path}.summary", "summary is required"))
-        else:
-            issues.extend(validate_raw_payload_markers(result["summary"], f"{path}.summary"))
     return issues
 
 
@@ -1072,8 +1004,6 @@ def validate_probe_result(data: dict[str, Any]) -> list[ValidationIssue]:
         issues.append(ValidationIssue("$.status", "status must be probe_pass, probe_failure, probe_error, or probe_skipped"))
     if not isinstance(data.get("summary"), str) or not data["summary"].strip():
         issues.append(ValidationIssue("$.summary", "summary is required"))
-    else:
-        issues.extend(validate_raw_payload_markers(data["summary"], "$.summary"))
     if data.get("read_only") is not True:
         issues.append(ValidationIssue("$.read_only", "read_only must be true"))
     if data.get("raw_output_stored") is not False:
@@ -1165,8 +1095,6 @@ def validate_app_cards(data: dict[str, Any], session: dict[str, Any] | None = No
         for key in ("title", "summary"):
             if not isinstance(card.get(key), str) or not card[key].strip():
                 issues.append(ValidationIssue(f"{path}.{key}", f"{key} is required"))
-            elif key == "summary":
-                issues.extend(validate_raw_payload_markers(card[key], f"{path}.{key}"))
         artifact_refs = card.get("artifact_refs")
         if not isinstance(artifact_refs, list) or not artifact_refs:
             issues.append(ValidationIssue(f"{path}.artifact_refs", "artifact_refs must be a non-empty list"))

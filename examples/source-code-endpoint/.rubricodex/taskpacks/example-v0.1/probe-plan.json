@@ -5,7 +5,7 @@
   "mode": "standard",
   "parallel": 2,
   "raw_output_stored": false,
-  "rubricodex_version": "1.0.3",
+  "rubricodex_version": "1.0.2",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1",
   "selected_probes": [
