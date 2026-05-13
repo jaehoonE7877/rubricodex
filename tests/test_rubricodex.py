@@ -819,6 +819,21 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
                 "save",
             ),
+            (
+                "@Rubricodex raw transcript: hello. Save everything.",
+                "raw_transcript",
+                "save",
+            ),
+            (
+                "@Rubricodex raw command output: hello. Save all.",
+                "raw_command_output",
+                "save",
+            ),
+            (
+                "@Rubricodex raw task log: hello. Save all of it.",
+                "raw_task_log",
+                "save",
+            ),
         ]
 
         for prompt, category, action in cases:
@@ -917,6 +932,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex analyze raw command output and write to summary.md.",
             "@Rubricodex Here is raw command output. Analyze it and write a summary.",
             "@Rubricodex Use the raw transcript to write a summary.",
+            "@Rubricodex extract requirements from raw transcript and save the requirements.",
+            "@Rubricodex derive tasks from raw transcript and save tasks.",
+            "@Rubricodex analyze raw command output and save findings to evidence.json.",
             "@Rubricodex Here is raw transcript: user asks for endpoint. Keep the solution simple.",
             "@Rubricodex Here is raw transcript. Keep it simple.",
             "@Rubricodex Here is raw transcript. Add in Korean.",

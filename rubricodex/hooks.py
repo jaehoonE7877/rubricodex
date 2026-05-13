@@ -207,6 +207,10 @@ SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
     r"evidence(?:\.json)?|report|scorecard|matrix|taskpack|requirements|policy|docs?|documentation)\b",
     re.IGNORECASE,
 )
+CROSS_RAW_BULK_OBJECT_PATTERN = re.compile(
+    r"^\s+(?:everything|all(?:\s+(?:of\s+)?(?:it|this|that|the\s+above|the\s+below|content|input|text|details))?)\b",
+    re.IGNORECASE,
+)
 RAW_PRESERVATION_QUALIFIER_PATTERN = re.compile(
     r"\b(?:verbatim|as[-\s]?is|unredacted|raw|unchanged|without\s+redaction)\b",
     re.IGNORECASE,
@@ -689,10 +693,21 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
             and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_destination_prefix)
             and not suffix_preserves_raw
         )
+        safe_derived_output_action = (
+            safe_derived_before
+            and not suffix_categories
+            and DERIVED_OUTPUT_OBJECT_PATTERN.search(suffix) is not None
+            and not suffix_preserves_raw
+        )
         if safe_summary_action or safe_summary_reference_action:
             safe_summary_antecedent = True
             continue
-        if safe_followup_action or safe_summary_pronoun_action or safe_derived_pronoun_action:
+        if (
+            safe_followup_action
+            or safe_summary_pronoun_action
+            or safe_derived_pronoun_action
+            or safe_derived_output_action
+        ):
             continue
         window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
         window_categories = _active_raw_categories(window)
@@ -729,6 +744,7 @@ def _cross_clause_english_storage_match(
         if _is_safe_broad_storage_action(action, suffix):
             continue
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+        has_bulk_raw_reference = CROSS_RAW_BULK_OBJECT_PATTERN.search(suffix) is not None
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
         has_unsafe_destination = UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is not None
         has_storage_destination = has_unsafe_destination if action in BROAD_ENGLISH_STORAGE_ACTIONS else has_destination_prefix
@@ -752,6 +768,11 @@ def _cross_clause_english_storage_match(
             continue
         if SAFE_CROSS_STORAGE_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_storage_destination:
             continue
+        if has_bulk_raw_reference:
+            return {
+                "matched_categories": ",".join(previous_categories),
+                "matched_action": action,
+            }
         if not has_raw_reference and not has_storage_destination and not has_prefix_raw_reference:
             if _is_bare_english_storage_imperative(action, prefix, suffix):
                 return {
