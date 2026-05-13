@@ -357,6 +357,14 @@ def _canonical_english_storage_action(action: str) -> str:
     return lowered
 
 
+def _has_policy_doc_prohibition_before_raw(text: str, raw_start: int) -> bool:
+    prefix = text[max(0, raw_start - 160) : raw_start]
+    return (
+        POLICY_DOC_DESTINATION_PATTERN.search(prefix) is not None
+        and POLICY_PROHIBITION_BEFORE_RAW_PATTERN.search(prefix) is not None
+    )
+
+
 def _has_contradicting_storage_after_raw(text: str, raw_start: int) -> bool:
     suffix = text[raw_start : raw_start + 120]
     boundary_match = ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN.search(suffix)
@@ -370,6 +378,8 @@ def _has_contradicting_storage_after_raw(text: str, raw_start: int) -> bool:
         if SAFE_SUMMARY_OBJECT_PATTERN.search(storage_suffix) is not None:
             continue
         if REFERENCE_RAW_OBJECT_PATTERN.search(storage_suffix) is not None:
+            if _has_policy_doc_prohibition_before_raw(text, raw_start):
+                continue
             return True
     return False
 
@@ -397,6 +407,8 @@ def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
     prefix = text[max(0, raw_start - 120) : raw_start]
     if BARE_NEGATED_RAW_PREFIX_PATTERN.search(prefix) is not None:
         return True
+    if _has_policy_doc_prohibition_before_raw(text, raw_start):
+        return not _has_contradicting_storage_after_raw(text, raw_start)
     match = NEGATED_STORAGE_BEFORE_RAW_PATTERN.search(prefix)
     if match is None:
         return False

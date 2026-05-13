@@ -955,6 +955,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write docs that say do not store raw transcripts. Save them to repo.",
             "@Rubricodex write AGENTS.md to forbid storing raw transcripts. Commit it.",
             "@Rubricodex add a rule that bans raw transcripts from being stored. Save it to AGENTS.md.",
+            "@Rubricodex write docs that say do not store raw transcripts and save them to repo.",
+            "@Rubricodex write AGENTS.md to forbid storing raw transcripts and commit it.",
+            "@Rubricodex add a rule that bans raw transcripts from being stored and save it to AGENTS.md.",
             "@Rubricodex do not store raw transcript; write a summary.",
             (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
         ]
