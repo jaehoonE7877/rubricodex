@@ -130,7 +130,7 @@ KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     + "|".join(KOREAN_STORAGE_ACTIONS)
     + r")(?:을|를)?\s*(?P<form>해야\s*합니다|해야합니다|합니다|하십시오|합시다|해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
     r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
-    r"\s*(?:$|[.!?。]|\s)",
+    r"\s*(?:$|[.!?。:：]|\s)",
 )
 KOREAN_ATTRIBUTIVE_STORAGE_FORMS = {"하는", "할", "하도록", "하게", "하기", "된", "되는", "되도록"}
 KOREAN_ATTRIBUTIVE_STORAGE_TARGET_PATTERN = re.compile(
@@ -167,7 +167,7 @@ RAW_INCLUSION_CONNECTOR_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SUMMARY_ONLY_FORWARD_OBJECT_PATTERN = re.compile(
-    r"^\s+(?:the\s+following\s+)?(?:a\s+|an\s+|the\s+)?"
+    r"^\s+(?:the\s+following\s+)?(?:a\s+|an\s+|the\s+|this\s+|that\s+|our\s+|my\s+)?"
     r"(?:summary|summaries|summarized|summarised|redacted|sanitized|sanitised)\b",
     re.IGNORECASE,
 )
@@ -185,6 +185,8 @@ RAW_PRESERVATION_QUALIFIER_PATTERN = re.compile(
     r"\b(?:verbatim|as[-\s]?is|unredacted|raw|unchanged|without\s+redaction)\b",
     re.IGNORECASE,
 )
+FORWARD_DELIMITER_PATTERN = re.compile(r"^\s*[:：]\s*$")
+KOREAN_RAW_PRESERVATION_OBJECT_PATTERN = re.compile(r"(?:원문|원본|그대로|전문|전체|무가공|무편집)")
 KEEP_OUT_PATTERN = re.compile(r"\b(?:out\s+of|outside|away\s+from)\b", re.IGNORECASE)
 POLICY_DOC_DESTINATION_PATTERN = re.compile(
     r"\b(?:policy|policies|docs?|documentation|rules?|guidelines?|agents\.md)\b|do-not-store",
@@ -301,7 +303,7 @@ def _canonical_english_storage_action(action: str) -> str:
 
 def _has_contradicting_storage_after_raw(text: str, raw_start: int) -> bool:
     suffix = text[raw_start : raw_start + 120]
-    boundary_match = re.search(r"\b(?:but|however|except|instead)\b", suffix, re.IGNORECASE)
+    boundary_match = ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN.search(suffix)
     if boundary_match is None:
         return False
     after_boundary = suffix[boundary_match.end() :]
@@ -318,7 +320,7 @@ def _has_contradicting_storage_after_raw(text: str, raw_start: int) -> bool:
 
 def _has_affirmative_storage_after_post_raw_negation(suffix: str, negation_end: int) -> bool:
     after_negation = suffix[negation_end : negation_end + 120]
-    boundary_match = re.search(r"\b(?:but|however|except|instead)\b", after_negation, re.IGNORECASE)
+    boundary_match = ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN.search(after_negation)
     if boundary_match is None:
         return False
     after_boundary = after_negation[boundary_match.end() :]
@@ -387,6 +389,8 @@ def _is_safe_korean_summary_action(text: str, action_start: int) -> bool:
         return False
     summary_context = window[summary_index:]
     if re.search(r"요약\s*(?:하지|말고|없이)|요약하지", summary_context) is not None:
+        return False
+    if KOREAN_RAW_PRESERVATION_OBJECT_PATTERN.search(summary_context) is not None:
         return False
     return not _raw_category_matches(summary_context)
 
@@ -665,9 +669,18 @@ def _forward_english_storage_match(clause: str) -> dict[str, str] | None:
         if _is_negated_english_action(clause, english_match.start()):
             continue
         suffix = clause[english_match.end() : english_match.end() + 160]
+        action = _canonical_english_storage_action(english_match.group(1))
+        if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
+            continue
         if SUMMARY_ONLY_FORWARD_OBJECT_PATTERN.search(suffix) is not None:
             continue
-        if FORWARD_STORAGE_OBJECT_PATTERN.search(suffix) is None:
+        has_forward_object = FORWARD_STORAGE_OBJECT_PATTERN.search(suffix) is not None
+        has_destination = (
+            DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
+            or UNSAFE_ARTIFACT_DESTINATION_PATTERN.search(suffix) is not None
+        )
+        has_forward_delimiter = FORWARD_DELIMITER_PATTERN.search(suffix) is not None
+        if not has_forward_object and not has_destination and not has_forward_delimiter:
             continue
         return {
             "matched_action": _canonical_english_storage_action(english_match.group(1)),
@@ -681,7 +694,10 @@ def _forward_korean_storage_match(clause: str) -> dict[str, str] | None:
         if _is_negated_korean_action(clause, action_start) or _is_safe_korean_summary_action(clause, action_start):
             continue
         window = clause[max(0, action_start - 80) : korean_match.end() + 80]
-        if KOREAN_FORWARD_STORAGE_OBJECT_PATTERN.search(window) is None:
+        if (
+            KOREAN_FORWARD_STORAGE_OBJECT_PATTERN.search(window) is None
+            and re.search(r"[:：]\s*$", korean_match.group(0)) is None
+        ):
             continue
         return {
             "matched_action": korean_match.group("action"),
@@ -747,7 +763,10 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if korean_match is not None:
             return korean_match
 
-        raw_preserving_match = _cross_clause_raw_preserving_storage_match(clause, previous_safe_source_categories)
+        raw_preserving_match = _cross_clause_raw_preserving_storage_match(
+            clause,
+            previous_safe_source_categories or previous_categories,
+        )
         if raw_preserving_match is not None:
             return raw_preserving_match
 
@@ -763,20 +782,22 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
         if negated_cross_clause_match is not None:
             return negated_cross_clause_match
 
-        forward_storage_match = _forward_english_storage_match(clause)
-        if forward_storage_match is None:
-            forward_storage_match = _forward_korean_storage_match(clause)
-        if forward_storage_match is not None:
-            if categories:
-                return {
-                    "matched_categories": ",".join(categories),
-                    "matched_action": forward_storage_match["matched_action"],
-                }
-            pending_forward_storage = forward_storage_match
-            pending_forward_excluded_categories = []
-            continue
+        safe_output_clause = _is_safe_output_clause(clause)
+        if not (categories and safe_output_clause):
+            forward_storage_match = _forward_english_storage_match(clause)
+            if forward_storage_match is None:
+                forward_storage_match = _forward_korean_storage_match(clause)
+            if forward_storage_match is not None:
+                if categories:
+                    return {
+                        "matched_categories": ",".join(categories),
+                        "matched_action": forward_storage_match["matched_action"],
+                    }
+                pending_forward_storage = forward_storage_match
+                pending_forward_excluded_categories = []
+                continue
 
-        if _is_safe_output_clause(clause):
+        if safe_output_clause:
             if categories or previous_categories:
                 previous_safe_source_categories = categories or previous_categories
             previous_categories = []

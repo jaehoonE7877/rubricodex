@@ -516,6 +516,18 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
             ),
             (
+                "@Rubricodex do not store raw transcript, store it in evidence.json.",
+                "raw_transcript",
+            ),
+            (
+                "@Rubricodex do not store raw transcript and store it in evidence.json.",
+                "raw_transcript",
+            ),
+            (
+                "@Rubricodex raw transcript should not be stored then save it in repo.",
+                "raw_transcript",
+            ),
+            (
                 "@Rubricodex raw transcript should not be stored but should be saved in repo.",
                 "raw_transcript",
             ),
@@ -561,8 +573,12 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex analyze raw command output and save it to evidence.json.", "raw_command_output"),
             ("@Rubricodex Here is raw command output. Analyze it and save it to evidence.json.", "raw_command_output"),
             ("@Rubricodex do not store a summary of the raw transcript, save it verbatim.", "raw_transcript"),
+            ("@Rubricodex Here is raw transcript. Save verbatim to evidence.json.", "raw_transcript"),
+            ("@Rubricodex Here is raw transcript. Save as-is to evidence.json.", "raw_transcript"),
             ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
             ("@Rubricodex save a redacted summary plus raw command output.", "raw_command_output"),
+            ("@Rubricodex raw transcript 요약하고 원문도 저장해줘.", "raw_transcript"),
+            ("@Rubricodex raw transcript 요약하고 그대로 저장해줘.", "raw_transcript"),
             ("@Rubricodex raw transcript 요약 말고 저장해줘.", "raw_transcript"),
             ("@Rubricodex raw transcript 요약 없이 저장해줘.", "raw_transcript"),
             (
@@ -591,6 +607,21 @@ class RubricodexContractTests(unittest.TestCase):
                 "@Rubricodex Store everything below in .rubricodex. raw transcript: hello",
                 "raw_transcript",
                 "store",
+            ),
+            (
+                "@Rubricodex Save to evidence.json:\nraw transcript: hello",
+                "raw_transcript",
+                "save",
+            ),
+            (
+                "@Rubricodex Write to evidence.json:\nraw command output: hello",
+                "raw_command_output",
+                "write",
+            ),
+            (
+                "@Rubricodex 저장해줘:\nraw task log: hello",
+                "raw_task_log",
+                "저장",
             ),
             (
                 "@Rubricodex Store everything below, including a summary. raw transcript: hello",
