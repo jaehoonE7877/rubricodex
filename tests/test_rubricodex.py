@@ -652,12 +652,29 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertIn(f"matched_categories={category}", result["reason"])
                 self.assertIn(f"matched_action={action}", result["reason"])
 
+    def test_hook_intake_blocks_long_inline_raw_storage_request(self) -> None:
+        prompt = "@Rubricodex raw transcript: " + ("line " * 80) + "store it in the repo."
+        result = evaluate_gate(
+            "intake-boundary",
+            {
+                "hook_event_name": "UserPromptSubmit",
+                "prompt": prompt,
+                "cwd": str(self.root),
+            },
+        )
+
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("matched_categories=raw_transcript", result["reason"])
+        self.assertIn("matched_action=store", result["reason"])
+
     def test_hook_intake_allows_policy_and_agents_prompts(self) -> None:
         cases = [
             "@Rubricodex follow this policy: raw transcript는 repo에 저장하지 않습니다.",
             "@Rubricodex do not store raw transcripts or raw command output.",
             "@Rubricodex store summarized evidence, not raw transcripts.",
             "@Rubricodex write docs that say do not store raw transcripts.",
+            "@Rubricodex include raw transcripts in the policy as disallowed items.",
+            "@Rubricodex add raw transcript to the do-not-store policy.",
             "@Rubricodex write an AGENTS policy: do not store raw transcripts or raw command output.",
             "@Rubricodex write an AGENTS policy: raw transcripts must not be stored in repo.",
             "@Rubricodex write docs: raw transcripts are not allowed to be stored.",
@@ -687,6 +704,9 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex Here is the raw transcript. Extract requirements. Save the goal lock.",
             "@Rubricodex Here is the raw transcript. Review it and write a summary.",
             "@Rubricodex Here is the raw transcript. Extract requirements from it and add tests.",
+            "@Rubricodex Here is the raw transcript. Extract requirements from it. Save them to evidence.json.",
+            "@Rubricodex Here is the raw transcript. Extract requirements. Save them to evidence.json.",
+            "@Rubricodex Here is the raw transcript. Extract requirements and save them to evidence.json.",
             "@Rubricodex Here is raw command output. Analyze it and write a summary.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 하지 말고 요약만 해줘.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 금지이고 요약만 해줘.",

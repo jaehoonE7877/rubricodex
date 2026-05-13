@@ -173,6 +173,25 @@ RAW_PRESERVATION_QUALIFIER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 KEEP_OUT_PATTERN = re.compile(r"\b(?:out\s+of|outside|away\s+from)\b", re.IGNORECASE)
+POLICY_DOC_DESTINATION_PATTERN = re.compile(
+    r"\b(?:policy|policies|docs?|documentation|rules?|guidelines?|agents\.md)\b|do-not-store",
+    re.IGNORECASE,
+)
+POLICY_PROHIBITION_CONTEXT_PATTERN = re.compile(
+    r"\b(?:disallowed|forbidden|prohibited|not\s+allowed|do-not-store|do\s+not\s+store|must\s+not|"
+    r"should\s+not|never|no)\b|금지|허용하지|저장하지",
+    re.IGNORECASE,
+)
+DERIVED_TRANSFORM_VERB_PATTERN = re.compile(
+    r"\b(?:extract|derive|summari[sz]e|redact|saniti[sz]e|analy[sz]e|review)\b|요약",
+    re.IGNORECASE,
+)
+DERIVED_OUTPUT_OBJECT_PATTERN = re.compile(
+    r"\b(?:requirements?|summar(?:y|ies)|redacted|sanitized|sanitised|evidence|findings?|criteria|tasks?|"
+    r"goal\s+lock|brief)\b",
+    re.IGNORECASE,
+)
+DERIVED_REFERENCE_OBJECT_PATTERN = re.compile(r"\b(?:it|them|these|those)\b", re.IGNORECASE)
 DESTINATION_STORAGE_PREFIX_PATTERN = re.compile(r"^\s+(?:to|into|in|inside|under|onto|within)\b", re.IGNORECASE)
 FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
     r"\b(?:everything\s+(?:below|above|that\s+follows)|the\s+following|"
@@ -367,6 +386,8 @@ def _active_raw_categories(text: str) -> list[str]:
 
 def _is_negated_english_action(text: str, action_start: int) -> bool:
     prefix = text[max(0, action_start - 32) : action_start].lower()
+    if prefix.rstrip().endswith(("do-not-", "do_not_", "must-not-", "should-not-")):
+        return True
     if NEGATED_ENGLISH_ACTION_PREFIX_PATTERN.search(prefix) is not None:
         return True
     suffix = text[action_start : action_start + 40]
@@ -386,6 +407,25 @@ def _has_safe_summary_transform_before(text: str) -> bool:
         if NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN.search(prefix) is None:
             return True
     return False
+
+
+def _has_safe_derived_output_before(text: str) -> bool:
+    for transform_match in DERIVED_TRANSFORM_VERB_PATTERN.finditer(text):
+        prefix = text[max(0, transform_match.start() - 40) : transform_match.start()]
+        if NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN.search(prefix) is not None:
+            continue
+        following = text[transform_match.start() :]
+        if DERIVED_OUTPUT_OBJECT_PATTERN.search(following) is not None:
+            return True
+    return False
+
+
+def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
+    return (
+        action in {"include", "add"}
+        and POLICY_DOC_DESTINATION_PATTERN.search(suffix) is not None
+        and POLICY_PROHIBITION_CONTEXT_PATTERN.search(suffix) is not None
+    )
 
 
 def _is_safe_summary_storage_suffix(suffix: str) -> bool:
@@ -417,10 +457,15 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         suffix = clause[english_match.end() : english_match.end() + 120]
         if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
             continue
+        if _is_policy_doc_reference_action(action, suffix):
+            continue
         prefix_categories = _active_raw_categories(clause[max(0, english_match.start() - 120) : english_match.start()])
+        full_prefix_categories = _active_raw_categories(clause[: english_match.start()])
         suffix_categories = _active_raw_categories(suffix)
         suffix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
         suffix_preserves_raw = RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is not None
+        has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
+        safe_derived_before = _has_safe_derived_output_before(clause[: english_match.start()])
         safe_summary_action = _is_safe_summary_storage_suffix(suffix) and (
             not prefix_categories or _has_safe_summary_transform_before(clause[: english_match.start()])
         )
@@ -438,16 +483,27 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         safe_summary_pronoun_action = (
             safe_summary_antecedent and not suffix_categories and suffix_raw_reference and not suffix_preserves_raw
         )
+        safe_derived_pronoun_action = (
+            safe_derived_before
+            and not suffix_categories
+            and DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None
+            and not suffix_preserves_raw
+        )
         if safe_summary_action or safe_summary_reference_action:
             safe_summary_antecedent = True
             continue
-        if safe_followup_action or safe_summary_pronoun_action:
+        if safe_followup_action or safe_summary_pronoun_action or safe_derived_pronoun_action:
             continue
         window = clause[max(0, english_match.start() - 120) : english_match.end() + 120]
         window_categories = _active_raw_categories(window)
         if window_categories:
             return {
                 "matched_categories": ",".join(window_categories),
+                "matched_action": action,
+            }
+        if full_prefix_categories and (suffix_raw_reference or has_destination_prefix):
+            return {
+                "matched_categories": ",".join(full_prefix_categories),
                 "matched_action": action,
             }
     return None
@@ -468,7 +524,15 @@ def _cross_clause_english_storage_match(
         action = _canonical_english_storage_action(english_match.group(1))
         if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
             continue
+        if _is_policy_doc_reference_action(action, suffix):
+            continue
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+        safe_derived_pronoun_action = (
+            _has_safe_derived_output_before(clause[: english_match.start()])
+            and DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None
+        )
+        if safe_derived_pronoun_action:
+            continue
         if require_raw_reference and not has_raw_reference:
             continue
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
@@ -566,7 +630,7 @@ def _explicit_raw_storage_request(prompt: str) -> dict[str, str] | None:
             previous_negated_categories = []
         elif raw_categories:
             previous_negated_categories = raw_categories
-        elif SAFE_SUMMARY_OBJECT_PATTERN.search(clause) is not None:
+        elif SAFE_SUMMARY_OBJECT_PATTERN.search(clause) is not None or _has_safe_derived_output_before(clause):
             previous_categories = []
             previous_negated_categories = []
             pending_forward_storage = None
