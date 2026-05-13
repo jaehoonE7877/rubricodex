@@ -370,8 +370,13 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex raw transcript 저장하고 요약은 저장하지 마.", "raw_transcript", "저장"),
             ("@Rubricodex raw transcript를 요약하지 말고 저장해줘.", "raw_transcript", "저장"),
             ("@Rubricodex 요약도 작성하고 raw transcript 저장해줘.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장하는 코드를 만들어줘.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장할 파일을 만들어줘.", "raw_transcript", "저장"),
+            ("@Rubricodex raw transcript 저장하도록 구현해줘.", "raw_transcript", "저장"),
             ("@Rubricodex raw task log 기록", "raw_task_log", "기록"),
+            ("@Rubricodex raw task log 기록하는 파일을 만들어줘.", "raw_task_log", "기록"),
             ("@Rubricodex raw command output 커밋", "raw_command_output", "커밋"),
+            ("@Rubricodex raw command output 커밋하는 스크립트를 만들어줘.", "raw_command_output", "커밋"),
         ]
 
         for prompt, category, action in cases:
@@ -504,6 +509,10 @@ class RubricodexContractTests(unittest.TestCase):
                 "raw_transcript",
             ),
             (
+                "@Rubricodex raw transcript should not be stored but should be saved in repo.",
+                "raw_transcript",
+            ),
+            (
                 "@Rubricodex raw transcript는 저장하지 말고 raw command output은 저장해줘.",
                 "raw_command_output",
             ),
@@ -534,6 +543,9 @@ class RubricodexContractTests(unittest.TestCase):
             ("@Rubricodex store raw transcript and do not store summaries.", "raw_transcript"),
             ("@Rubricodex raw transcript should be stored in repo and never persisted elsewhere.", "raw_transcript"),
             ("@Rubricodex save raw command output to evidence but never store transcripts.", "raw_command_output"),
+            ("@Rubricodex summarize the raw transcript and store it verbatim.", "raw_transcript"),
+            ("@Rubricodex summarize the raw transcript and store it as-is.", "raw_transcript"),
+            ("@Rubricodex summarize the raw transcript and store it unredacted.", "raw_transcript"),
             ("@Rubricodex store the summary and raw transcript in evidence.json.", "raw_transcript"),
             ("@Rubricodex save a redacted summary plus raw command output.", "raw_command_output"),
             (
@@ -658,6 +670,8 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex write docs: raw transcripts should not ever be stored in repo.",
             "@Rubricodex write docs: raw transcripts are not to be stored.",
             "@Rubricodex raw transcript is stored nowhere; write summary only.",
+            "@Rubricodex keep raw command output out of the repo.",
+            "@Rubricodex raw transcript is below. Keep it out of evidence.json.",
             "@Rubricodex Store everything below in .rubricodex. Do not include raw transcripts.",
             "@Rubricodex store the summary of the raw transcript in evidence.json.",
             "@Rubricodex store a summary of the raw transcript and add it to evidence.json.",

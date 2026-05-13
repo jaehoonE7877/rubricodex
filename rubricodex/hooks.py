@@ -128,8 +128,14 @@ ENGLISH_ACTION_NOWHERE_PATTERN = re.compile(
 KOREAN_RAW_STORAGE_REQUEST_PATTERN = re.compile(
     r"(?P<action>"
     + "|".join(KOREAN_STORAGE_ACTIONS)
-    + r")\s*(?:해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|할\s*것)?"
+    + r")\s*(?P<form>해줘|해주세요|하세요|하라|해라|해|해야|해 주세요|부탁|하고|한\s*뒤|한\s*후|후|"
+    r"할\s*것|하는|할|하도록|하게|하기|된|되는|되도록)?"
     r"\s*(?:$|[.!?。]|\s)",
+)
+KOREAN_ATTRIBUTIVE_STORAGE_FORMS = {"하는", "할", "하도록", "하게", "하기", "된", "되는", "되도록"}
+KOREAN_ATTRIBUTIVE_STORAGE_TARGET_PATTERN = re.compile(
+    r"^\s*(?:코드|파일|스크립트|로직|기능|구현|함수|명령)"
+    r"|(?:만들|구현|작성|생성|추가|수정|패치|적용|해줘|해주세요)"
 )
 REFERENCE_RAW_OBJECT_PATTERN = re.compile(r"\b(?:it|this|that|them|these|those|above|below|same)\b", re.IGNORECASE)
 SAFE_SUMMARY_OBJECT_PATTERN = re.compile(
@@ -162,6 +168,11 @@ SAFE_CROSS_STORAGE_OBJECT_PATTERN = re.compile(
     r"evidence(?:\.json)?|report|scorecard|matrix|taskpack|requirements|policy|docs?|documentation)\b",
     re.IGNORECASE,
 )
+RAW_PRESERVATION_QUALIFIER_PATTERN = re.compile(
+    r"\b(?:verbatim|as[-\s]?is|unredacted|raw|unchanged|without\s+redaction)\b",
+    re.IGNORECASE,
+)
+KEEP_OUT_PATTERN = re.compile(r"\b(?:out\s+of|outside|away\s+from)\b", re.IGNORECASE)
 DESTINATION_STORAGE_PREFIX_PATTERN = re.compile(r"^\s+(?:to|into|in|inside|under|onto|within)\b", re.IGNORECASE)
 FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
     r"\b(?:everything\s+(?:below|above|that\s+follows)|the\s+following|"
@@ -259,6 +270,25 @@ def _has_contradicting_storage_after_raw(text: str, raw_start: int) -> bool:
     return False
 
 
+def _has_affirmative_storage_after_post_raw_negation(suffix: str, negation_end: int) -> bool:
+    after_negation = suffix[negation_end : negation_end + 120]
+    boundary_match = re.search(r"\b(?:but|however|except|instead)\b", after_negation, re.IGNORECASE)
+    if boundary_match is None:
+        return False
+    after_boundary = after_negation[boundary_match.end() :]
+    for storage_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(after_boundary):
+        if _is_negated_english_action(after_boundary, storage_match.start()):
+            continue
+        storage_prefix = after_boundary[max(0, storage_match.start() - 60) : storage_match.start()]
+        storage_suffix = after_boundary[storage_match.end() : storage_match.end() + 80]
+        if SAFE_SUMMARY_OBJECT_PATTERN.search(storage_prefix) is not None:
+            continue
+        if _is_safe_summary_storage_suffix(storage_suffix):
+            continue
+        return True
+    return False
+
+
 def _is_negated_raw_reference(text: str, raw_start: int) -> bool:
     prefix = text[max(0, raw_start - 120) : raw_start]
     if BARE_NEGATED_RAW_PREFIX_PATTERN.search(prefix) is not None:
@@ -315,6 +345,8 @@ def _is_negated_english_raw_reference_after(text: str, raw_end: int) -> bool:
     if ENGLISH_NEGATION_BOUNDARY_PATTERN.search(before_negation) is not None:
         return False
     if ENGLISH_DETACHED_POST_RAW_NEGATION_PATTERN.search(before_negation) is not None:
+        return False
+    if _has_affirmative_storage_after_post_raw_negation(suffix, match.end()):
         return False
     return not _has_affirmative_storage_action(before_negation)
 
@@ -381,10 +413,14 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
     for english_match in ENGLISH_STORAGE_ACTION_PATTERN.finditer(clause):
         if _is_negated_english_action(clause, english_match.start()):
             continue
+        action = _canonical_english_storage_action(english_match.group(1))
         suffix = clause[english_match.end() : english_match.end() + 120]
+        if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
+            continue
         prefix_categories = _active_raw_categories(clause[max(0, english_match.start() - 120) : english_match.start()])
         suffix_categories = _active_raw_categories(suffix)
         suffix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+        suffix_preserves_raw = RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is not None
         safe_summary_action = _is_safe_summary_storage_suffix(suffix) and (
             not prefix_categories or _has_safe_summary_transform_before(clause[: english_match.start()])
         )
@@ -392,13 +428,16 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
             not suffix_categories
             and _has_safe_summary_transform_before(clause[: english_match.start()])
             and suffix_raw_reference
+            and not suffix_preserves_raw
         )
         safe_followup_action = (
             not suffix_categories
             and not suffix_raw_reference
             and SAFE_FOLLOWUP_OBJECT_PATTERN.search(suffix) is not None
         )
-        safe_summary_pronoun_action = safe_summary_antecedent and not suffix_categories and suffix_raw_reference
+        safe_summary_pronoun_action = (
+            safe_summary_antecedent and not suffix_categories and suffix_raw_reference and not suffix_preserves_raw
+        )
         if safe_summary_action or safe_summary_reference_action:
             safe_summary_antecedent = True
             continue
@@ -409,7 +448,7 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         if window_categories:
             return {
                 "matched_categories": ",".join(window_categories),
-                "matched_action": _canonical_english_storage_action(english_match.group(1)),
+                "matched_action": action,
             }
     return None
 
@@ -427,6 +466,8 @@ def _cross_clause_english_storage_match(
             continue
         suffix = clause[english_match.end() : english_match.end() + 120]
         action = _canonical_english_storage_action(english_match.group(1))
+        if action == "keep" and KEEP_OUT_PATTERN.search(suffix) is not None:
+            continue
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
         if require_raw_reference and not has_raw_reference:
             continue
@@ -464,6 +505,11 @@ def _korean_storage_match(clause: str, categories: list[str]) -> dict[str, str] 
         return None
     for korean_match in KOREAN_RAW_STORAGE_REQUEST_PATTERN.finditer(clause):
         action_start = korean_match.start("action")
+        form = korean_match.group("form")
+        if form in KOREAN_ATTRIBUTIVE_STORAGE_FORMS:
+            suffix = clause[korean_match.end() : korean_match.end() + 80]
+            if KOREAN_ATTRIBUTIVE_STORAGE_TARGET_PATTERN.search(suffix) is None:
+                continue
         if _is_negated_korean_action(clause, action_start) or _is_safe_korean_summary_action(clause, action_start):
             continue
         return {
