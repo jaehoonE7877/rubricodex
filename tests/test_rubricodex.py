@@ -588,6 +588,16 @@ class RubricodexContractTests(unittest.TestCase):
                 "save",
             ),
             (
+                "@Rubricodex Save this to evidence.json:\nraw transcript: hello",
+                "raw_transcript",
+                "save",
+            ),
+            (
+                "@Rubricodex Save the content below to evidence.json:\nraw transcript: hello",
+                "raw_transcript",
+                "save",
+            ),
+            (
                 "@Rubricodex Here is the raw transcript. Store it in the repo.",
                 "raw_transcript",
                 "store",
@@ -710,6 +720,8 @@ class RubricodexContractTests(unittest.TestCase):
             "@Rubricodex Here is the raw transcript. Extract requirements from it. Save them to evidence.json.",
             "@Rubricodex Here is the raw transcript. Extract requirements. Save them to evidence.json.",
             "@Rubricodex Here is the raw transcript. Extract requirements and save them to evidence.json.",
+            "@Rubricodex Here is the raw transcript. Extract requirements from it and save to evidence.json.",
+            "@Rubricodex Here is raw command output. Analyze it and write to summary.md.",
             "@Rubricodex Here is raw command output. Analyze it and write a summary.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 하지 말고 요약만 해줘.",
             "@Rubricodex raw transcript는 아래에 있어요. 저장 금지이고 요약만 해줘.",

@@ -196,7 +196,9 @@ DESTINATION_STORAGE_PREFIX_PATTERN = re.compile(r"^\s+(?:to|into|in|inside|under
 FORWARD_STORAGE_OBJECT_PATTERN = re.compile(
     r"\b(?:everything\s+(?:below|above|that\s+follows)|the\s+following|"
     r"following\s+(?:content|input|text|transcript|output)|"
-    r"all\s+(?:of\s+)?(?:this|the\s+following|content|input|text|details|below))\b",
+    r"(?:the\s+)?(?:content|input|text|details)\s+below|"
+    r"all\s+(?:of\s+)?(?:this|the\s+following|content|input|text|details|below)|"
+    r"this|that|below|above)\b",
     re.IGNORECASE,
 )
 
@@ -420,6 +422,17 @@ def _has_safe_derived_output_before(text: str) -> bool:
     return False
 
 
+def _has_safe_analysis_reference_before(text: str) -> bool:
+    for transform_match in re.finditer(r"\banaly[sz]e\b", text, re.IGNORECASE):
+        prefix = text[max(0, transform_match.start() - 40) : transform_match.start()]
+        if NEGATED_SUMMARY_TRANSFORM_PREFIX_PATTERN.search(prefix) is not None:
+            continue
+        following = text[transform_match.end() :]
+        if REFERENCE_RAW_OBJECT_PATTERN.search(following) is not None:
+            return True
+    return False
+
+
 def _is_policy_doc_reference_action(action: str, suffix: str) -> bool:
     return (
         action in {"include", "add"}
@@ -465,7 +478,10 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         suffix_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
         suffix_preserves_raw = RAW_PRESERVATION_QUALIFIER_PATTERN.search(suffix) is not None
         has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
-        safe_derived_before = _has_safe_derived_output_before(clause[: english_match.start()])
+        prefix = clause[: english_match.start()]
+        safe_derived_before = _has_safe_derived_output_before(prefix) or (
+            _has_safe_analysis_reference_before(prefix) and DERIVED_OUTPUT_OBJECT_PATTERN.search(suffix) is not None
+        )
         safe_summary_action = _is_safe_summary_storage_suffix(suffix) and (
             not prefix_categories or _has_safe_summary_transform_before(clause[: english_match.start()])
         )
@@ -486,7 +502,7 @@ def _same_clause_english_storage_match(clause: str) -> dict[str, str] | None:
         safe_derived_pronoun_action = (
             safe_derived_before
             and not suffix_categories
-            and DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None
+            and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_destination_prefix)
             and not suffix_preserves_raw
         )
         if safe_summary_action or safe_summary_reference_action:
@@ -527,15 +543,22 @@ def _cross_clause_english_storage_match(
         if _is_policy_doc_reference_action(action, suffix):
             continue
         has_raw_reference = REFERENCE_RAW_OBJECT_PATTERN.search(suffix) is not None
+        has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
+        prefix = clause[: english_match.start()]
         safe_derived_pronoun_action = (
-            _has_safe_derived_output_before(clause[: english_match.start()])
-            and DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None
+            (
+                _has_safe_derived_output_before(prefix)
+                or (
+                    _has_safe_analysis_reference_before(prefix)
+                    and DERIVED_OUTPUT_OBJECT_PATTERN.search(suffix) is not None
+                )
+            )
+            and (DERIVED_REFERENCE_OBJECT_PATTERN.search(suffix) is not None or has_destination_prefix)
         )
         if safe_derived_pronoun_action:
             continue
         if require_raw_reference and not has_raw_reference:
             continue
-        has_destination_prefix = DESTINATION_STORAGE_PREFIX_PATTERN.search(suffix) is not None
         if SAFE_SUMMARY_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
             continue
         if SAFE_FOLLOWUP_OBJECT_PATTERN.search(suffix) is not None and not has_raw_reference and not has_destination_prefix:
