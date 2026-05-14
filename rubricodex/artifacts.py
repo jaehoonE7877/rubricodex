@@ -2148,7 +2148,43 @@ def evidence_draft_path(root: Path | str, run_id: str) -> Path:
     return run_dir(root, run_id) / "evidence.draft.json"
 
 
-def _evidence_sketch_prompt(run_id: str, matrix: dict[str, Any], changed_files: list[str]) -> str:
+def _retune_scope_for_run(root_path: Path, run_id: str) -> tuple[list[str], list[str], str | None]:
+    lock_file = goal_lock_path(root_path, run_id)
+    if not lock_file.is_file():
+        return [], [], None
+    lock = read_json(lock_file)
+    parent_run_id = lock.get("parent_run_id")
+    retune_targets = lock.get("retune_targets")
+    preserved = lock.get("preserved_pass_criteria")
+    target_ids = (
+        [str(item) for item in retune_targets if str(item).strip()]
+        if isinstance(retune_targets, list)
+        else []
+    )
+    preserved_ids = (
+        [str(item) for item in preserved if str(item).strip()]
+        if isinstance(preserved, list)
+        else []
+    )
+    parent = parent_run_id if isinstance(parent_run_id, str) and parent_run_id.strip() else None
+    return target_ids, preserved_ids, parent
+
+
+def _criteria_for_ids(matrix: dict[str, Any], criterion_ids: list[str] | None) -> list[dict[str, Any]]:
+    allowed = set(criterion_ids or [])
+    return [
+        criterion
+        for criterion in matrix.get("criteria", [])
+        if isinstance(criterion, dict) and (not allowed or str(criterion.get("id")) in allowed)
+    ]
+
+
+def _evidence_sketch_prompt(
+    run_id: str,
+    matrix: dict[str, Any],
+    changed_files: list[str],
+    criterion_ids: list[str] | None = None,
+) -> str:
     criteria = [
         {
             "id": criterion.get("id"),
@@ -2156,8 +2192,7 @@ def _evidence_sketch_prompt(run_id: str, matrix: dict[str, Any], changed_files: 
             "check_question": criterion.get("check_question"),
             "evidence_required": criterion.get("evidence_required", []),
         }
-        for criterion in matrix.get("criteria", [])
-        if isinstance(criterion, dict)
+        for criterion in _criteria_for_ids(matrix, criterion_ids)
     ]
     return f"""Read this repository in read-only mode and draft Rubricodex evidence for run {run_id}.
 
@@ -2183,11 +2218,12 @@ def _fallback_evidence_sketch(
     mode: str,
     run_id: str,
     changed_files: list[str],
+    criterion_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     evidence = base_artifact(EVIDENCE_TYPE, mode=mode, run_id=run_id)
     items = []
-    for index, criterion in enumerate(matrix.get("criteria", [])):
-        if not isinstance(criterion, dict) or not criterion.get("id"):
+    for index, criterion in enumerate(_criteria_for_ids(matrix, criterion_ids)):
+        if not criterion.get("id"):
             continue
         ref = changed_files[index % len(changed_files)]
         items.append(
@@ -2216,6 +2252,7 @@ def _coerce_evidence_sketch(
     matrix: dict[str, Any],
     mode: str,
     run_id: str,
+    criterion_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(candidate, dict):
         raise ArtifactError([ValidationIssue("$.evidence_sketch", "subagent evidence sketch must be a JSON object")])
@@ -2229,6 +2266,13 @@ def _coerce_evidence_sketch(
     )
     if not isinstance(evidence["evidence_items"], list):
         raise ArtifactError([ValidationIssue("$.evidence_items", "evidence_items must be a list")])
+    if criterion_ids:
+        allowed = set(criterion_ids)
+        evidence["evidence_items"] = [
+            item
+            for item in evidence["evidence_items"]
+            if isinstance(item, dict) and str(item.get("criterion_id")) in allowed
+        ]
     assert_valid(validate_evidence(evidence, matrix))
     return evidence
 
@@ -2255,7 +2299,8 @@ def sketch_evidence(
     if not normalized_changed:
         raise ArtifactError([ValidationIssue("$.changed_files", "evidence sketch requires at least one changed file")])
 
-    prompt = _evidence_sketch_prompt(run_id, matrix, normalized_changed)
+    retune_target_ids, _, _ = _retune_scope_for_run(root_path, run_id)
+    prompt = _evidence_sketch_prompt(run_id, matrix, normalized_changed, retune_target_ids or None)
     sketch_source = "codex-subagent"
     sketch_error = None
     try:
@@ -2275,11 +2320,11 @@ def sketch_evidence(
         )
         if candidate is None:
             raise ArtifactError([ValidationIssue("$.evidence_sketch", "subagent did not return a JSON sketch")])
-        evidence = _coerce_evidence_sketch(candidate, matrix, mode, run_id)
+        evidence = _coerce_evidence_sketch(candidate, matrix, mode, run_id, retune_target_ids or None)
     except (ArtifactError, TypeError, ValueError) as error:
         sketch_source = "deterministic-fallback"
         sketch_error = str(error)
-        evidence = _fallback_evidence_sketch(matrix, mode, run_id, normalized_changed)
+        evidence = _fallback_evidence_sketch(matrix, mode, run_id, normalized_changed, retune_target_ids or None)
         assert_valid(validate_evidence(evidence, matrix))
 
     draft_path = write_json(evidence_draft_path(root_path, run_id), evidence)
@@ -2335,20 +2380,43 @@ def _criterion_reason(criterion: dict[str, Any], status: str, items: list[dict[s
     return reason
 
 
+def _find_preserved_pass_evidence(
+    root_path: Path,
+    parent_run_id: str,
+    criterion_id: str,
+    matrix: dict[str, Any],
+    visited: set[str],
+) -> list[tuple[dict[str, Any], str]]:
+    if parent_run_id in visited:
+        return []
+    visited.add(parent_run_id)
+
+    parent_evidence_file = run_dir(root_path, parent_run_id) / "evidence.json"
+    if parent_evidence_file.is_file():
+        parent_evidence = read_json(parent_evidence_file)
+        assert_valid(validate_evidence(parent_evidence, matrix))
+        pass_items = [
+            item
+            for item in parent_evidence["evidence_items"]
+            if str(item.get("criterion_id")) == criterion_id and item.get("status") == "pass"
+        ]
+        if pass_items:
+            return [(item, parent_run_id) for item in pass_items]
+
+    _, preserved, ancestor_run_id = _retune_scope_for_run(root_path, parent_run_id)
+    if ancestor_run_id is None or criterion_id not in preserved:
+        return []
+    return _find_preserved_pass_evidence(root_path, ancestor_run_id, criterion_id, matrix, visited)
+
+
 def _inherit_preserved_parent_evidence(
     root_path: Path,
     run_id: str,
     matrix: dict[str, Any],
     items_by_criterion: dict[str, list[dict[str, Any]]],
 ) -> None:
-    lock_file = goal_lock_path(root_path, run_id)
-    if not lock_file.is_file():
-        return
-
-    lock = read_json(lock_file)
-    parent_run_id = lock.get("parent_run_id")
-    preserved = lock.get("preserved_pass_criteria")
-    if not isinstance(parent_run_id, str) or not parent_run_id.strip() or not isinstance(preserved, list):
+    _, preserved, parent_run_id = _retune_scope_for_run(root_path, run_id)
+    if parent_run_id is None or not preserved:
         return
 
     missing_preserved_ids = [
@@ -2359,25 +2427,14 @@ def _inherit_preserved_parent_evidence(
     if not missing_preserved_ids:
         return
 
-    parent_evidence_file = run_dir(root_path, parent_run_id) / "evidence.json"
-    if not parent_evidence_file.is_file():
-        return
-    parent_evidence = read_json(parent_evidence_file)
-    assert_valid(validate_evidence(parent_evidence, matrix))
-
-    parent_items: dict[str, list[dict[str, Any]]] = {}
-    for item in parent_evidence["evidence_items"]:
-        if item.get("status") == "pass":
-            parent_items.setdefault(str(item["criterion_id"]), []).append(item)
-
     for criterion_id in missing_preserved_ids:
         inherited_items = []
-        for item in parent_items.get(criterion_id, []):
+        for item, origin_run_id in _find_preserved_pass_evidence(root_path, parent_run_id, criterion_id, matrix, set()):
             summary = str(item.get("summary") or "").strip()
             inherited = dict(item)
-            inherited["summary"] = f"Inherited pass evidence from parent run {parent_run_id}: {summary}"
+            inherited["summary"] = f"Inherited pass evidence from parent run {origin_run_id}: {summary}"
             inherited["status"] = "pass"
-            inherited["inherited_from_run"] = parent_run_id
+            inherited["inherited_from_run"] = origin_run_id
             inherited_items.append(inherited)
         if inherited_items:
             items_by_criterion[criterion_id] = inherited_items

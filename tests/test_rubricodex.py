@@ -2399,6 +2399,58 @@ class RubricodexContractTests(unittest.TestCase):
         inherited = next(result for result in scorecard["results"] if result["criterion_id"] == "C-01")
         self.assertIn("Inherited pass evidence from parent run example-v0.1", inherited["reason"])
 
+    def test_retune_evidence_sketch_fallback_limits_items_to_retune_targets(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        sketch_evidence(
+            self.root,
+            "example-v0.1-r2",
+            changed_files=["src/server.js"],
+            review_decision="yes",
+            sketch_runner=lambda **_: None,
+        )
+        evidence = read_json(run_dir(self.root, "example-v0.1-r2") / "evidence.json")
+        scorecard = compute_scorecard(self.root, "example-v0.1-r2")
+
+        self.assertEqual({item["criterion_id"] for item in evidence["evidence_items"]}, {"C-05"})
+        self.assertEqual(scorecard["counts"], {"pass": 4, "partial": 1, "missing_evidence": 0, "fail": 0})
+        self.assertEqual(scorecard["decision"], "pass_with_warnings")
+
+    def test_retune_chain_inherits_preserved_evidence_from_ancestor_runs(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        child_evidence = sample_evidence(matrix, {"C-05": "partial"}, run_id="example-v0.1-r2")
+        child_evidence["evidence_items"] = [
+            item for item in child_evidence["evidence_items"] if item["criterion_id"] == "C-05"
+        ]
+        write_json(run_dir(self.root, "example-v0.1-r2") / "evidence.json", child_evidence)
+        compute_scorecard(self.root, "example-v0.1-r2")
+        write_report(self.root, "example-v0.1-r2")
+        apply_retune(self.root, "example-v0.1-r2")
+
+        grandchild_evidence = sample_evidence(matrix, {"C-05": "pass"}, run_id="example-v0.1-r3")
+        grandchild_evidence["evidence_items"] = [
+            item for item in grandchild_evidence["evidence_items"] if item["criterion_id"] == "C-05"
+        ]
+        write_json(run_dir(self.root, "example-v0.1-r3") / "evidence.json", grandchild_evidence)
+
+        scorecard = compute_scorecard(self.root, "example-v0.1-r3")
+
+        self.assertEqual(scorecard["decision"], "pass")
+        self.assertEqual(scorecard["counts"], {"pass": 5, "partial": 0, "missing_evidence": 0, "fail": 0})
+        inherited = next(result for result in scorecard["results"] if result["criterion_id"] == "C-01")
+        self.assertIn("example-v0.1", inherited["reason"])
+
     def test_cli_retune_apply_command(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
