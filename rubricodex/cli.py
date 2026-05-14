@@ -179,7 +179,7 @@ def cmd_plan_draft(args: argparse.Namespace) -> int:
         propose=args.propose,
         propose_timeout=args.propose_timeout,
         codex_bin=args.codex_bin,
-        review=args.review,
+        review=args.review or review_decision is not None,
         review_decision=review_decision,
     )
     _print_json(result)

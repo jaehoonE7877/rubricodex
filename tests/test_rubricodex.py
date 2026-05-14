@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import shutil
 import tempfile
 import unittest
@@ -315,6 +316,17 @@ class RubricodexContractTests(unittest.TestCase):
 
         for key in ("parent_run_id", "retune_depth", "preserved_pass_criteria", "retune_targets", "matrix_hash"):
             self.assertIn(key, properties)
+
+    def test_matrix_schema_id_pattern_matches_path_safe_segment(self) -> None:
+        properties = load_schema(MATRIX_TYPE)["properties"]
+        pattern = re.compile(properties["criteria"]["items"]["properties"]["id"]["pattern"])
+
+        for value in ("C-01", "C 01"):
+            with self.subTest(value=value):
+                self.assertTrue(pattern.fullmatch(value))
+        for value in (" C-01", "C-01 ", "../../escaped", ".", "..", " "):
+            with self.subTest(value=value):
+                self.assertFalse(pattern.fullmatch(value))
 
     def test_committed_fixture_artifacts_have_schema_coverage(self) -> None:
         schemas = schema_index()
@@ -1082,6 +1094,46 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, 2)
         self.assertFalse((taskpack_dir(self.root, "conflict") / "goal.lock.json").exists())
+
+    def test_cli_plan_draft_no_implies_review_rejection(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "reject-without-review",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    "--no",
+                ]
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn('"review_status": "rejected"', stdout.getvalue())
+        self.assertFalse((taskpack_dir(self.root, "reject-without-review") / "goal.lock.json").exists())
+
+    def test_cli_plan_draft_yes_implies_review_confirmation(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "confirm-without-review",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    "--yes",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"review_status": "confirmed"', stdout.getvalue())
+        self.assertTrue((taskpack_dir(self.root, "confirm-without-review") / "goal.lock.json").is_file())
 
     def test_cli_plan_draft_honors_global_mode(self) -> None:
         old_cwd = Path.cwd()

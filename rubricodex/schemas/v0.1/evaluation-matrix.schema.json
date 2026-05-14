@@ -22,7 +22,7 @@
             "type": "string",
             "minLength": 1,
             "not": { "enum": [".", ".."] },
-            "pattern": "^[^/\\\\]+$"
+            "pattern": "^(?!\\.\\.?$)(?!.*[/\\\\])\\S(?:.*\\S)?$"
           },
           "name": { "type": "string", "minLength": 1 },
           "claim": { "type": "string", "minLength": 1 },
