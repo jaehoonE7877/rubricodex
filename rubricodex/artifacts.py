@@ -346,11 +346,17 @@ def criteria_fingerprint(matrix: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(criterion, dict):
             continue
         evidence_required = criterion.get("evidence_required", [])
+        levels = criterion.get("levels")
         locked.append(
             {
                 "id": criterion.get("id"),
+                "name": criterion.get("name"),
+                "claim": criterion.get("claim"),
+                "check_question": criterion.get("check_question"),
                 "hard_gate": bool(criterion.get("hard_gate")),
                 "evidence_required": list(evidence_required) if isinstance(evidence_required, list) else [],
+                "levels": dict(levels) if isinstance(levels, dict) else {},
+                "retune_hint": criterion.get("retune_hint"),
             }
         )
     return locked
@@ -1484,6 +1490,22 @@ def _current_criteria_by_id(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]
     }
 
 
+PRESERVED_CRITERION_FIELDS = (
+    "id",
+    "name",
+    "claim",
+    "check_question",
+    "hard_gate",
+    "evidence_required",
+    "levels",
+    "retune_hint",
+)
+
+
+def _preserved_criterion_changed(locked: dict[str, Any], current: dict[str, Any]) -> bool:
+    return any(key in locked and locked.get(key) != current.get(key) for key in PRESERVED_CRITERION_FIELDS)
+
+
 def _section_has_criterion_marker(section: str, criterion_id: str) -> bool:
     pattern = rf"(^|\n)\s*-\s*{re.escape(criterion_id)}(?=[:\s(-])"
     return re.search(pattern, section) is not None
@@ -1633,7 +1655,7 @@ def validate_matrix_lock(
                     )
                 )
                 continue
-            if locked.get("hard_gate") != current.get("hard_gate") or locked.get("evidence_required") != current.get("evidence_required"):
+            if _preserved_criterion_changed(locked, current):
                 issues.append(
                     ValidationIssue(
                         f"$.preserved_pass_criteria.{criterion_id}",

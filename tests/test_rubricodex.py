@@ -2370,6 +2370,8 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(lock["retune_depth"], 1)
         self.assertEqual(lock["retune_targets"], ["C-05"])
         self.assertIn("C-01", lock["preserved_pass_criteria"])
+        locked_criteria = {item["id"]: item for item in lock["locked_criteria"]}
+        self.assertEqual(locked_criteria["C-01"]["claim"], "Criterion 1 is satisfied.")
         child_goal = (taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").read_text(encoding="utf-8")
         self.assertIn("/goal Retune Rubricodex run example-v0.1-r2", child_goal)
         self.assertIn("- Run id: example-v0.1-r2", child_goal)
@@ -2608,6 +2610,22 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertFalse(result["revision_approved"])
         self.assertIn("retune lock missing current matrix criteria", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_preserved_claim_change(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        matrix["criteria"][0]["claim"] = "Changed preserved criterion meaning."
+        write_json(matrix_path(self.root), matrix)
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve matrix refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("V-012", str(result["issues"]))
 
     def test_retune_lock_revision_rejects_missing_preserved_goal_guardrail(self) -> None:
         matrix = self.write_default_contract()
