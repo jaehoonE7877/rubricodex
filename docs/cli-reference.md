@@ -24,14 +24,33 @@ rubricodex matrix lock --run-id <run-id>
 
 `plan draft`는 fresh 또는 unlocked root에서 intent brief, evaluation matrix, taskpack, prompt lint, matrix lock을 한 번에 만듭니다. 이미 locked taskpack이 있으면 기존 계약을 덮어쓰지 않고 실패합니다.
 
+v1.0.4부터 `plan draft`는 읽기 전용 Codex subagent로 matrix 초안을 제안하고, 고정 전에 사용자가 확인하는 흐름을 지원합니다.
+
+```bash
+rubricodex plan draft \
+  --run-id <run-id> \
+  --goal "<goal>" \
+  --propose \
+  --review \
+  --yes
+```
+
+- `--propose`: `codex exec --sandbox read-only --ephemeral`로 matrix 제안을 시도하고 실패하면 deterministic draft로 폴백합니다.
+- `--propose-timeout 60`: subagent 제한 시간을 조정합니다.
+- `--review --yes`: non-interactive 환경에서 matrix 확인을 명시합니다.
+- `--review --no`: matrix를 고정하지 않고 중단합니다.
+
 ## 구현 후 검증
 
 ```bash
 rubricodex evidence validate --run-id <run-id>
+rubricodex evidence sketch --run-id <run-id> --changed-file <path> --yes
 rubricodex score compute --run-id <run-id>
 rubricodex score validate --run-id <run-id>
 rubricodex report --run-id <run-id>
 ```
+
+`evidence sketch`는 `goal.lock.json`의 기준과 변경 파일을 보고 `.rubricodex/runs/<run-id>/evidence.draft.json`을 만듭니다. `--yes`를 붙인 경우에만 같은 내용을 `evidence.json`으로 승격합니다. raw transcript, raw log, unredacted command output은 저장하지 않습니다.
 
 전체 local harness 흐름은 orchestrator로 실행합니다.
 
@@ -41,6 +60,16 @@ rubricodex orchestrate status --run-id <run-id>
 ```
 
 local runner는 기본적으로 dry-run handoff만 기록합니다. 실제 Codex CLI 실행은 `--execute`를 명시할 때만 시도합니다.
+
+## Retune
+
+`report`가 만든 `retune_goal.md`는 새 taskpack으로 바로 재발행할 수 있습니다.
+
+```bash
+rubricodex retune apply --run-id <run-id>
+```
+
+기본 run-id는 `<run-id>-r2`, 다음 실행은 `<run-id>-r3`처럼 증가합니다. 새 lock에는 `parent_run_id`, `retune_depth`, `preserved_pass_criteria`, `retune_targets`가 기록되어 이미 통과한 기준을 다시 건드리지 않도록 검증합니다.
 
 ## App artifacts
 
