@@ -2411,6 +2411,39 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertIn("$.retune_targets.C-999", str(result["issues"]))
 
+    def test_retune_lock_revision_rejects_new_matrix_criteria_outside_scope(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        matrix["criteria"].append(criterion(6))
+        write_json(matrix_path(self.root), matrix)
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve matrix refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("retune lock missing current matrix criteria", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_missing_preserved_goal_guardrail(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        goal_text = goal_path.read_text(encoding="utf-8")
+        goal_path.write_text(goal_text.replace("  - C-01 Endpoint contract\n", ""), encoding="utf-8")
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.preserved_pass_criteria.C-01", str(result["issues"]))
+
     def test_retune_lock_revision_preserves_retune_metadata(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")

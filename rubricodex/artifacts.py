@@ -1557,6 +1557,12 @@ def validate_matrix_lock(
         if isinstance(retune_targets, list) and retune_targets
         else []
     )
+    preserved = lock.get("preserved_pass_criteria")
+    preserved_ids = (
+        [str(item) for item in preserved if str(item).strip()]
+        if isinstance(preserved, list) and preserved
+        else []
+    )
     for criterion_id in retune_target_ids:
         if criterion_id not in current_criteria:
             issues.append(
@@ -1565,19 +1571,30 @@ def validate_matrix_lock(
                     f"retune target missing from current matrix: {criterion_id}",
                 )
             )
-    goal_required_criteria = retune_target_ids or list(current_criteria)
+    if retune_target_ids or preserved_ids:
+        missing_retune_scope = sorted(set(current_criteria) - (set(retune_target_ids) | set(preserved_ids)))
+        if missing_retune_scope:
+            issues.append(
+                ValidationIssue(
+                    "$.retune_scope",
+                    "retune lock missing current matrix criteria: " + ", ".join(missing_retune_scope),
+                )
+            )
+    goal_required_criteria = retune_target_ids if retune_target_ids or preserved_ids else list(current_criteria)
     for criterion_id in goal_required_criteria:
         if not _section_has_criterion_marker(evaluation_text, criterion_id):
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
 
-    preserved = lock.get("preserved_pass_criteria")
-    if isinstance(preserved, list):
+    if preserved_ids:
+        exclude_text = _section_content(goal_text, "Exclude") or ""
+        working_rules_text = _section_content(goal_text, "Working rules") or ""
+        preservation_text = "\n".join(part for part in (exclude_text, working_rules_text) if part)
         current_fingerprints = {
             str(item.get("id")): item
             for item in criteria_fingerprint({"criteria": list(current_criteria.values())})
             if isinstance(item, dict) and item.get("id")
         }
-        for criterion_id in [str(item) for item in preserved if str(item).strip()]:
+        for criterion_id in preserved_ids:
             locked = locked_criteria.get(criterion_id)
             current = current_fingerprints.get(criterion_id)
             if locked is None or current is None:
@@ -1595,6 +1612,13 @@ def validate_matrix_lock(
                         f"V-012 preserved pass criterion changed after retune lock: {criterion_id}",
                     )
                 )
+            if not _section_has_criterion_marker(preservation_text, criterion_id):
+                issues.append(
+                    ValidationIssue(
+                        f"$.goal.preserved_pass_criteria.{criterion_id}",
+                        f"goal.md is missing preserved pass criterion {criterion_id}",
+                    )
+                )
     return issues
 
 
@@ -1605,7 +1629,9 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "hard gate was weakened",
             "evidence_required was removed",
             "goal.md is missing criterion",
+            "goal.md is missing preserved pass criterion",
             "V-012 preserved pass criterion changed",
+            "retune lock missing current matrix criteria",
             "retune target missing from current matrix",
         )
     )
