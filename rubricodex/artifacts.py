@@ -1643,6 +1643,7 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "V-012 preserved pass criterion changed",
             "retune lock missing current matrix criteria",
             "retune target missing from current matrix",
+            "retune target missing from Include",
         )
     )
 
