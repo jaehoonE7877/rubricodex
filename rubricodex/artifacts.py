@@ -864,6 +864,24 @@ def _review_matrix(
     )
 
 
+def _is_confirm_review_decision(review_decision: str | None) -> bool:
+    decision = review_decision.strip().lower() if isinstance(review_decision, str) else None
+    return decision in {"y", "yes", "confirm", "confirmed"}
+
+
+def _review_draft_matches_request(brief: dict[str, Any], goal_text: str, mode: str) -> bool:
+    if brief.get("mode") != mode:
+        return False
+    blocks = brief.get("blocks")
+    if not isinstance(blocks, dict):
+        return False
+    goal_summary = " ".join(goal_text.strip().split())
+    purpose = blocks.get("purpose")
+    scope_in = blocks.get("scope_in", [])
+    scope_text = " ".join(str(item) for item in scope_in) if isinstance(scope_in, list) else str(scope_in)
+    return goal_summary in str(purpose) or goal_summary in scope_text
+
+
 def locked_taskpack_run_ids(root: Path | str) -> list[str]:
     taskpacks = artifact_root(root) / "taskpacks"
     if not taskpacks.exists():
@@ -909,9 +927,24 @@ def draft_harness(
             ]
         )
     init_project(root_path, mode=active_mode, executor=executor)
-    brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
     proposal_error = None
-    if propose:
+    use_existing_review_draft = (
+        review
+        and _is_confirm_review_decision(review_decision)
+        and intent_path(root_path).is_file()
+        and matrix_path(root_path).is_file()
+    )
+    if use_existing_review_draft:
+        brief = read_json(intent_path(root_path))
+        matrix = read_json(matrix_path(root_path))
+        if not _review_draft_matches_request(brief, goal_text, active_mode):
+            raise ArtifactError(
+                [ValidationIssue("$.review", "existing review draft does not match requested goal or mode")]
+            )
+        matrix_source = "existing-draft"
+    else:
+        brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
+    if propose and not use_existing_review_draft:
         matrix, matrix_source, proposal_error = _propose_matrix(
             root_path,
             goal_text,
@@ -920,13 +953,14 @@ def draft_harness(
             codex_bin=codex_bin,
             proposal_runner=proposal_runner,
         )
-    else:
+    elif not use_existing_review_draft:
         matrix = draft_matrix(goal_text, active_mode)
         matrix_source = "deterministic"
     assert_valid(validate_brief(brief, active_mode))
     assert_valid(validate_matrix(matrix, active_mode))
-    write_json(intent_path(root_path), brief)
-    write_json(matrix_path(root_path), matrix)
+    if not use_existing_review_draft:
+        write_json(intent_path(root_path), brief)
+        write_json(matrix_path(root_path), matrix)
     review_status = "not_requested"
     if review:
         review_status = _review_matrix(root_path, active_mode, review_decision=review_decision, editor=editor)
@@ -1507,7 +1541,7 @@ def _preserved_criterion_changed(locked: dict[str, Any], current: dict[str, Any]
 
 
 def _section_has_criterion_marker(section: str, criterion_id: str) -> bool:
-    pattern = rf"(^|\n)\s*-\s*{re.escape(criterion_id)}(?=[:\s(-])"
+    pattern = rf"(^|\n)\s*-\s*{re.escape(criterion_id)}(?=$|[:\s(])"
     return re.search(pattern, section) is not None
 
 

@@ -919,6 +919,60 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["review_status"], "confirmed")
         self.assertTrue((taskpack_dir(self.root, "reviewed") / "goal.lock.json").is_file())
 
+    def test_plan_draft_review_confirmation_reuses_existing_reviewed_matrix(self) -> None:
+        def proposer(name: str):
+            def run(**_: object) -> dict:
+                matrix = sample_matrix()
+                matrix["criteria"][0]["name"] = name
+                return {"criteria": matrix["criteria"]}
+
+            return run
+
+        with self.assertRaises(ArtifactError):
+            draft_harness(
+                self.root,
+                "reviewed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                propose=True,
+                review=True,
+                proposal_runner=proposer("Reviewed matrix"),
+            )
+
+        result = draft_harness(
+            self.root,
+            "reviewed",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            propose=True,
+            review=True,
+            review_decision="yes",
+            proposal_runner=proposer("Regenerated matrix"),
+        )
+        matrix = read_json(matrix_path(self.root))
+
+        self.assertEqual(result["review_status"], "confirmed")
+        self.assertEqual(result["matrix_source"], "existing-draft")
+        self.assertEqual(matrix["criteria"][0]["name"], "Reviewed matrix")
+
+    def test_plan_draft_review_confirmation_rejects_mismatched_existing_draft(self) -> None:
+        with self.assertRaises(ArtifactError):
+            draft_harness(
+                self.root,
+                "reviewed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                review=True,
+            )
+
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(
+                self.root,
+                "reviewed",
+                "다른 billing endpoint를 만들고 test evidence를 남겨줘.",
+                review=True,
+                review_decision="yes",
+            )
+
+        self.assertIn("$.review", {issue.path for issue in context.exception.issues})
+
     def test_plan_draft_review_auto_accepts_micro_mode(self) -> None:
         result = draft_harness(
             self.root,
@@ -2603,6 +2657,22 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertIn("$.goal.exclude.C-05", str(context.exception.issues))
         self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
+    def test_retune_apply_matches_exact_criterion_ids_without_prefix_collision(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][1]["id"] = "C-01-extra"
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), matrix)
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-01": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["retune_targets"], ["C-01"])
+        self.assertIn("C-01-extra", result["preserved_pass_criteria"])
 
     def test_retune_apply_rejects_scorecard_missing_current_matrix_criteria(self) -> None:
         matrix = self.write_default_contract()
