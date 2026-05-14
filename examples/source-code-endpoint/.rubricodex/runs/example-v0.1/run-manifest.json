@@ -8,7 +8,7 @@
       "summary": "Dry-run only; Codex CLI was not executed and goal.md remains the fallback handoff."
     }
   ],
-  "created_at": "2026-05-12T06:55:04Z",
+  "created_at": "2026-05-14T07:09:03Z",
   "execution_mode": "dry_run",
   "executor": "codex-cli-local",
   "fallback_goal_exported": true,
@@ -18,7 +18,7 @@
   "prompt_lint_path": ".rubricodex/taskpacks/example-v0.1/prompt-lint.json",
   "raw_output_stored": false,
   "result_summary": "Dry-run Codex CLI handoff verified for source-code-endpoint fixture.",
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.4",
   "run_id": "example-v0.1",
   "schema_version": "rubricodex.v0.1",
   "verification_commands": [

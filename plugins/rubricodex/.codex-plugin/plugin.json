@@ -1,6 +1,6 @@
 {
   "name": "rubricodex",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "description": "Compress ambiguous Codex implementation requests into bounded goals, evidence, scorecards, and retune instructions.",
   "author": {
     "name": "Rubricodex",
@@ -20,9 +20,9 @@
     "capabilities": ["Interactive", "Write"],
     "websiteURL": "https://app.notion.com/p/3544408817af8182b23ecf3ba169d82e",
     "defaultPrompt": [
-      "Use Rubricodex to turn this request into a bounded goal.",
-      "Score this implementation with the Rubricodex matrix.",
-      "Create a retune goal from this Rubricodex scorecard."
+      "Use Rubricodex to turn this request into a bounded goal with a confirmed matrix.",
+      "Draft summarized evidence for this Rubricodex run.",
+      "Create a retune taskpack from this Rubricodex scorecard."
     ],
     "composerIcon": "./assets/rubricodex-plugin-thumbnail.png",
     "logo": "./assets/rubricodex-plugin-icon.png",

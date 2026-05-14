@@ -64,7 +64,7 @@
   "executor": "codex-cli-goal",
   "mode": "standard",
   "raw_output_stored": false,
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.4",
   "run_id": "example-v0.1",
   "runner_manifest_path": ".rubricodex/runs/example-v0.1/run-manifest.json",
   "runner_summary": "Dry-run Codex CLI handoff verified for source-code-endpoint fixture.",
