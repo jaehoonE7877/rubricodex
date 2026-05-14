@@ -2546,10 +2546,11 @@ def _parent_retune_depth(lock: dict[str, Any], run_id: str) -> int:
 def _next_retune_run_id(root: Path, run_id: str, parent_depth: int | None = None) -> tuple[str, int]:
     base, suffix_depth = _split_retune_revision(run_id)
     next_revision = suffix_depth + 2
-    next_depth = (parent_depth if parent_depth is not None else suffix_depth) + 1
+    base_depth = parent_depth if parent_depth is not None else suffix_depth
     while True:
         candidate = f"{base}-r{next_revision}"
         if not taskpack_dir(root, candidate).exists():
+            next_depth = base_depth + (next_revision - suffix_depth - 1)
             return candidate, next_depth
         next_revision += 1
 

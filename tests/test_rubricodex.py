@@ -2399,9 +2399,13 @@ class RubricodexContractTests(unittest.TestCase):
         write_report(self.root, "example-v0.1")
         apply_retune(self.root, "example-v0.1")
 
-        result = apply_retune(self.root, "example-v0.1")
+        result = apply_retune(self.root, "example-v0.1", depth_warn=1)
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r3"))
 
         self.assertEqual(result["new_run_id"], "example-v0.1-r3")
+        self.assertEqual(result["retune_depth"], 2)
+        self.assertEqual(lock["retune_depth"], 2)
+        self.assertIn("retune depth 2", result["warning"])
 
     def test_retune_apply_continues_two_digit_revision_ids(self) -> None:
         matrix = self.write_default_contract()
