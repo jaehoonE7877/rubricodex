@@ -1607,6 +1607,16 @@ def validate_matrix_lock(
         for criterion_id in preserved_ids:
             locked = locked_criteria.get(criterion_id)
             current = current_fingerprints.get(criterion_id)
+            if _section_has_criterion_marker(include_text, criterion_id) or _section_has_criterion_marker(
+                evaluation_text,
+                criterion_id,
+            ):
+                issues.append(
+                    ValidationIssue(
+                        f"$.goal.retune_scope.preserved_pass_criteria.{criterion_id}",
+                        f"preserved pass criterion included in retune scope: {criterion_id}",
+                    )
+                )
             if locked is None or current is None:
                 issues.append(
                     ValidationIssue(
@@ -1644,6 +1654,7 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "retune lock missing current matrix criteria",
             "retune target missing from current matrix",
             "retune target missing from Include",
+            "preserved pass criterion included in retune scope",
         )
     )
 

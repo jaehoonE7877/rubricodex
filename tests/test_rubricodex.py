@@ -2483,6 +2483,25 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("$.goal.include.C-05", str(context.exception.issues))
         self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
 
+    def test_retune_apply_rejects_preserved_pass_in_include(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        text = retune_path.read_text(encoding="utf-8")
+        retune_path.write_text(
+            text.replace("## Include\n", "## Include\n- C-01 Endpoint contract: pass. Do not retune.\n", 1),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.retune_scope.preserved_pass_criteria.C-01", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
     def test_retune_apply_rejects_scorecard_missing_current_matrix_criteria(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -2597,6 +2616,26 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertFalse(result["revision_approved"])
         self.assertIn("$.goal.include.C-05", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_preserved_pass_in_evaluation(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        text = goal_path.read_text(encoding="utf-8")
+        goal_path.write_text(
+            text.replace("## Evaluation\n", "## Evaluation\n- C-01: should stay preserved.\n", 1),
+            encoding="utf-8",
+        )
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.retune_scope.preserved_pass_criteria.C-01", str(result["issues"]))
 
     def test_retune_lock_revision_preserves_retune_metadata(self) -> None:
         matrix = self.write_default_contract()
