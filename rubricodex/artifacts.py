@@ -7,9 +7,10 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import __version__
+from .subagents import run_read_only_json
 
 
 SCHEMA_VERSION = "rubricodex.v0.1"
@@ -191,6 +192,7 @@ STATUS_ORDER = {
 
 RETUNE_STATUSES = {"partial", "missing_evidence", "fail"}
 LIGHT_LOCK_MODES = {"micro", "quick"}
+REVIEW_AUTO_ACCEPT_MODES = {"micro", "quick"}
 
 
 @dataclass(frozen=True)
@@ -711,6 +713,136 @@ def draft_matrix(goal: str, mode: str) -> dict[str, Any]:
     return matrix
 
 
+def _matrix_proposal_prompt(goal: str, mode: str) -> str:
+    return f"""Read this repository in read-only mode and propose a Rubricodex evaluation matrix.
+
+Goal:
+{goal}
+
+Mode: {mode}
+
+Return only JSON. Use the existing Rubricodex evaluation matrix shape:
+{{"criteria": [{{"id": "C-01", "name": "...", "claim": "...", "check_question": "...", "evidence_required": ["..."], "hard_gate": true, "levels": {{"pass": "...", "partial": "...", "fail": "..."}}, "retune_hint": "..."}}]}}
+
+Rules:
+- Create 4-6 criteria for standard mode, 6-8 for strict, 3-7 for audit, 2-3 for quick, 1-2 for micro.
+- Make criteria grounded in files, APIs, tests, schemas, or docs you can read.
+- Do not edit files, run write commands, or store raw output.
+- Keep evidence requirements summarized and reference-based.
+"""
+
+
+def _coerce_criterion(index: int, criterion: dict[str, Any]) -> dict[str, Any]:
+    criterion_id = str(criterion.get("id") or f"C-{index:02d}").strip()
+    if not criterion_id:
+        criterion_id = f"C-{index:02d}"
+    evidence_required = criterion.get("evidence_required")
+    if not isinstance(evidence_required, list):
+        evidence_required = []
+    levels = criterion.get("levels")
+    if not isinstance(levels, dict):
+        levels = {}
+    name = str(criterion.get("name") or f"Criterion {index}").strip()
+    claim = str(criterion.get("claim") or f"{name} is satisfied.").strip()
+    return {
+        "id": criterion_id,
+        "name": name,
+        "claim": claim,
+        "check_question": str(
+            criterion.get("check_question") or f"Does {name.lower()} have summarized evidence?"
+        ).strip(),
+        "evidence_required": [str(item).strip() for item in evidence_required if str(item).strip()],
+        "hard_gate": bool(criterion.get("hard_gate")),
+        "levels": {
+            "pass": str(levels.get("pass") or "Summarized evidence proves this criterion.").strip(),
+            "partial": str(levels.get("partial") or "Evidence is present but incomplete.").strip(),
+            "fail": str(levels.get("fail") or "Evidence disproves this criterion.").strip(),
+        },
+        "retune_hint": str(
+            criterion.get("retune_hint") or f"Fix {criterion_id} without reworking criteria already marked pass."
+        ).strip(),
+    }
+
+
+def _coerce_matrix_proposal(candidate: Any, goal: str, mode: str) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        raise ArtifactError([ValidationIssue("$.proposal", "subagent proposal must be a JSON object")])
+    criteria = candidate.get("criteria")
+    if not isinstance(criteria, list):
+        raise ArtifactError([ValidationIssue("$.proposal.criteria", "subagent proposal must include criteria")])
+    matrix = base_artifact(MATRIX_TYPE, mode=mode)
+    matrix.update(
+        {
+            "method": "gqe-r-lite",
+            "draft_goal": " ".join(goal.strip().split()),
+            "criteria": [
+                _coerce_criterion(index, criterion)
+                for index, criterion in enumerate(criteria, start=1)
+                if isinstance(criterion, dict)
+            ],
+        }
+    )
+    assert_valid(validate_matrix(matrix, mode))
+    return matrix
+
+
+def _propose_matrix(
+    root: Path,
+    goal: str,
+    mode: str,
+    *,
+    timeout: int = 60,
+    codex_bin: str = "codex",
+    proposal_runner: Callable[..., Any] | None = None,
+) -> tuple[dict[str, Any], str, str | None]:
+    prompt = _matrix_proposal_prompt(goal, mode)
+    try:
+        candidate = (
+            proposal_runner(root=root, goal=goal, mode=mode, prompt=prompt, timeout=timeout, codex_bin=codex_bin)
+            if proposal_runner
+            else run_read_only_json(root, prompt, timeout=timeout, codex_bin=codex_bin)
+        )
+        if candidate is None:
+            raise ArtifactError([ValidationIssue("$.proposal", "subagent did not return a JSON proposal")])
+        return _coerce_matrix_proposal(candidate, goal, mode), "codex-subagent", None
+    except (ArtifactError, TypeError, ValueError) as error:
+        fallback = draft_matrix(goal, mode)
+        return fallback, "deterministic-fallback", str(error)
+
+
+def _review_matrix(
+    root: Path,
+    mode: str,
+    *,
+    review_decision: str | None = None,
+    editor: str | None = None,
+) -> str:
+    decision = review_decision.strip().lower() if isinstance(review_decision, str) else None
+    if decision in {"y", "yes", "confirm", "confirmed"}:
+        return "confirmed"
+    if decision in {"n", "no", "cancel", "reject", "rejected"}:
+        return "rejected"
+    if decision == "edit":
+        if not editor:
+            raise ArtifactError([ValidationIssue("$.review", "edit review requires an editor")])
+        completed = subprocess.run([editor, str(matrix_path(root))], check=False)
+        if completed.returncode != 0:
+            raise ArtifactError([ValidationIssue("$.review", f"editor exited with code {completed.returncode}")])
+        matrix = read_json(matrix_path(root))
+        assert_valid(validate_matrix(matrix, mode))
+        return "edited"
+    if mode in REVIEW_AUTO_ACCEPT_MODES:
+        return "auto_accepted"
+    raise ArtifactError(
+        [
+            ValidationIssue(
+                "$.review",
+                "matrix confirmation required for this mode; rerun with --yes, --no, or interactive edit",
+            )
+        ]
+    )
+
+
 def locked_taskpack_run_ids(root: Path | str) -> list[str]:
     taskpacks = artifact_root(root) / "taskpacks"
     if not taskpacks.exists():
@@ -725,6 +857,13 @@ def draft_harness(
     mode: str = "auto",
     task_kind: str = "implementation",
     executor: str = DEFAULT_EXECUTOR,
+    propose: bool = False,
+    propose_timeout: int = 60,
+    codex_bin: str = "codex",
+    proposal_runner: Callable[..., Any] | None = None,
+    review: bool = False,
+    review_decision: str | None = None,
+    editor: str | None = None,
 ) -> dict[str, Any]:
     goal_text = goal.strip()
     if not goal_text:
@@ -734,6 +873,8 @@ def draft_harness(
         raise ArtifactError([ValidationIssue("$.mode", f"mode must be auto or one of {', '.join(MODE_CRITERIA_RANGE)}")])
     if not _is_safe_path_segment(run_id):
         raise ArtifactError([ValidationIssue("$.run_id", "run_id must be a single path-safe segment")])
+    if propose_timeout < 1:
+        raise ArtifactError([ValidationIssue("$.propose_timeout", "propose timeout must be greater than zero")])
 
     root_path = Path(root)
     locked_run_ids = locked_taskpack_run_ids(root_path)
@@ -748,11 +889,38 @@ def draft_harness(
         )
     init_project(root_path, mode=active_mode, executor=executor)
     brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
-    matrix = draft_matrix(goal_text, active_mode)
+    proposal_error = None
+    if propose:
+        matrix, matrix_source, proposal_error = _propose_matrix(
+            root_path,
+            goal_text,
+            active_mode,
+            timeout=propose_timeout,
+            codex_bin=codex_bin,
+            proposal_runner=proposal_runner,
+        )
+    else:
+        matrix = draft_matrix(goal_text, active_mode)
+        matrix_source = "deterministic"
     assert_valid(validate_brief(brief, active_mode))
     assert_valid(validate_matrix(matrix, active_mode))
     write_json(intent_path(root_path), brief)
     write_json(matrix_path(root_path), matrix)
+    review_status = "not_requested"
+    if review:
+        review_status = _review_matrix(root_path, active_mode, review_decision=review_decision, editor=editor)
+        if review_status == "rejected":
+            return {
+                "status": "fail",
+                "mode": active_mode,
+                "run_id": run_id,
+                "readiness": brief["request_readiness"],
+                "brief_path": str(intent_path(root_path)),
+                "matrix_path": str(matrix_path(root_path)),
+                "matrix_source": matrix_source,
+                "proposal_error": proposal_error,
+                "review_status": review_status,
+            }
     paths = compile_goal(root_path, run_id, mode=active_mode, executor=executor)
     lint = lint_goal_file(root_path, run_id, mode=active_mode)
     lock = verify_matrix_lock(root_path, run_id, mode=active_mode)
@@ -764,6 +932,9 @@ def draft_harness(
         "paths": {name: str(path) for name, path in paths.items()},
         "brief_path": str(intent_path(root_path)),
         "matrix_path": str(matrix_path(root_path)),
+        "matrix_source": matrix_source,
+        "proposal_error": proposal_error,
+        "review_status": review_status,
         "prompt_lint_status": lint["status"],
         "matrix_lock_status": lock["status"],
     }
@@ -1360,9 +1531,41 @@ def validate_matrix_lock(
             )
 
     evaluation_text = _section_content(goal_text, "Evaluation") or ""
-    for criterion_id in current_criteria:
+    retune_targets = lock.get("retune_targets")
+    goal_required_criteria = (
+        [str(item) for item in retune_targets if str(item).strip()]
+        if isinstance(retune_targets, list) and retune_targets
+        else list(current_criteria)
+    )
+    for criterion_id in goal_required_criteria:
         if criterion_id not in evaluation_text:
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
+
+    preserved = lock.get("preserved_pass_criteria")
+    if isinstance(preserved, list):
+        current_fingerprints = {
+            str(item.get("id")): item
+            for item in criteria_fingerprint({"criteria": list(current_criteria.values())})
+            if isinstance(item, dict) and item.get("id")
+        }
+        for criterion_id in [str(item) for item in preserved if str(item).strip()]:
+            locked = locked_criteria.get(criterion_id)
+            current = current_fingerprints.get(criterion_id)
+            if locked is None or current is None:
+                issues.append(
+                    ValidationIssue(
+                        f"$.preserved_pass_criteria.{criterion_id}",
+                        f"V-012 preserved pass criterion changed after retune lock: {criterion_id}",
+                    )
+                )
+                continue
+            if locked.get("hard_gate") != current.get("hard_gate") or locked.get("evidence_required") != current.get("evidence_required"):
+                issues.append(
+                    ValidationIssue(
+                        f"$.preserved_pass_criteria.{criterion_id}",
+                        f"V-012 preserved pass criterion changed after retune lock: {criterion_id}",
+                    )
+                )
     return issues
 
 
@@ -1373,6 +1576,7 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "hard gate was weakened",
             "evidence_required was removed",
             "goal.md is missing criterion",
+            "V-012 preserved pass criterion changed",
         )
     )
 
@@ -1821,6 +2025,176 @@ def run_probes(
     }
 
 
+def evidence_draft_path(root: Path | str, run_id: str) -> Path:
+    return run_dir(root, run_id) / "evidence.draft.json"
+
+
+def _evidence_sketch_prompt(run_id: str, matrix: dict[str, Any], changed_files: list[str]) -> str:
+    criteria = [
+        {
+            "id": criterion.get("id"),
+            "name": criterion.get("name"),
+            "check_question": criterion.get("check_question"),
+            "evidence_required": criterion.get("evidence_required", []),
+        }
+        for criterion in matrix.get("criteria", [])
+        if isinstance(criterion, dict)
+    ]
+    return f"""Read this repository in read-only mode and draft Rubricodex evidence for run {run_id}.
+
+Changed files:
+{json.dumps(changed_files, indent=2)}
+
+Criteria:
+{json.dumps(criteria, indent=2)}
+
+Return only JSON using the existing evidence artifact shape:
+{{"evidence_items": [{{"criterion_id": "C-01", "summary": "one-line summarized evidence", "artifact_refs": ["path"], "status": "partial"}}]}}
+
+Rules:
+- Use only file paths and one-line summaries.
+- Do not include raw command output, raw logs, transcripts, stdout, or stderr.
+- Do not edit files.
+- Mark uncertain items as partial or missing_evidence.
+"""
+
+
+def _fallback_evidence_sketch(
+    matrix: dict[str, Any],
+    mode: str,
+    run_id: str,
+    changed_files: list[str],
+) -> dict[str, Any]:
+    evidence = base_artifact(EVIDENCE_TYPE, mode=mode, run_id=run_id)
+    items = []
+    for index, criterion in enumerate(matrix.get("criteria", [])):
+        if not isinstance(criterion, dict) or not criterion.get("id"):
+            continue
+        ref = changed_files[index % len(changed_files)]
+        items.append(
+            {
+                "id": f"E-{criterion['id']}",
+                "criterion_id": criterion["id"],
+                "kind": "code",
+                "summary": f"Draft evidence from {ref}; user confirmation required for {criterion['id']}.",
+                "artifact_refs": [ref],
+                "status": "partial",
+                "confidence": 0.4,
+            }
+        )
+    evidence.update(
+        {
+            "executor": LOCAL_RUNNER_EXECUTOR,
+            "raw_output_stored": False,
+            "evidence_items": items,
+        }
+    )
+    return evidence
+
+
+def _coerce_evidence_sketch(
+    candidate: Any,
+    matrix: dict[str, Any],
+    mode: str,
+    run_id: str,
+) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        raise ArtifactError([ValidationIssue("$.evidence_sketch", "subagent evidence sketch must be a JSON object")])
+    evidence = base_artifact(EVIDENCE_TYPE, mode=mode, run_id=run_id)
+    evidence.update(
+        {
+            "executor": str(candidate.get("executor") or LOCAL_RUNNER_EXECUTOR),
+            "raw_output_stored": False,
+            "evidence_items": candidate.get("evidence_items", []),
+        }
+    )
+    if not isinstance(evidence["evidence_items"], list):
+        raise ArtifactError([ValidationIssue("$.evidence_items", "evidence_items must be a list")])
+    assert_valid(validate_evidence(evidence, matrix))
+    return evidence
+
+
+def sketch_evidence(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    changed_files: list[str] | None = None,
+    review_decision: str | None = None,
+    sketch_timeout: int = 60,
+    codex_bin: str = "codex",
+    sketch_runner: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    if sketch_timeout < 1:
+        raise ArtifactError([ValidationIssue("$.sketch_timeout", "sketch timeout must be greater than zero")])
+    root_path = Path(root)
+    _assert_local_runner_ready(root_path, run_id, mode)
+    matrix = read_json(matrix_path(root_path))
+    assert_valid(validate_matrix(matrix, mode))
+
+    normalized_changed = [path.strip() for path in (changed_files or _summarize_changed_files(root_path)) if path.strip()]
+    if not normalized_changed:
+        raise ArtifactError([ValidationIssue("$.changed_files", "evidence sketch requires at least one changed file")])
+
+    prompt = _evidence_sketch_prompt(run_id, matrix, normalized_changed)
+    sketch_source = "codex-subagent"
+    sketch_error = None
+    try:
+        candidate = (
+            sketch_runner(
+                root=root_path,
+                run_id=run_id,
+                mode=mode,
+                matrix=matrix,
+                changed_files=normalized_changed,
+                prompt=prompt,
+                timeout=sketch_timeout,
+                codex_bin=codex_bin,
+            )
+            if sketch_runner
+            else run_read_only_json(root_path, prompt, timeout=sketch_timeout, codex_bin=codex_bin)
+        )
+        if candidate is None:
+            raise ArtifactError([ValidationIssue("$.evidence_sketch", "subagent did not return a JSON sketch")])
+        evidence = _coerce_evidence_sketch(candidate, matrix, mode, run_id)
+    except (ArtifactError, TypeError, ValueError) as error:
+        sketch_source = "deterministic-fallback"
+        sketch_error = str(error)
+        evidence = _fallback_evidence_sketch(matrix, mode, run_id, normalized_changed)
+        assert_valid(validate_evidence(evidence, matrix))
+
+    draft_path = write_json(evidence_draft_path(root_path, run_id), evidence)
+    decision = review_decision.strip().lower() if isinstance(review_decision, str) else None
+    if decision in {"n", "no", "cancel", "reject", "rejected"}:
+        return {
+            "status": "fail",
+            "run_id": run_id,
+            "evidence_draft_path": str(draft_path),
+            "review_status": "rejected",
+            "sketch_source": sketch_source,
+            "sketch_error": sketch_error,
+        }
+    if decision in {"y", "yes", "confirm", "confirmed"}:
+        evidence_path = write_json(run_dir(root_path, run_id) / "evidence.json", evidence)
+        return {
+            "status": "pass",
+            "run_id": run_id,
+            "evidence_draft_path": str(draft_path),
+            "evidence_path": str(evidence_path),
+            "review_status": "confirmed",
+            "sketch_source": sketch_source,
+            "sketch_error": sketch_error,
+        }
+    return {
+        "status": "needs_confirmation",
+        "run_id": run_id,
+        "evidence_draft_path": str(draft_path),
+        "review_status": "pending",
+        "changed_files": normalized_changed,
+        "sketch_source": sketch_source,
+        "sketch_error": sketch_error,
+    }
+
+
 def _criterion_reason(criterion: dict[str, Any], status: str, items: list[dict[str, Any]]) -> str:
     if not items:
         reason = "No summarized evidence item was recorded for this criterion."
@@ -2072,6 +2446,130 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
     assert_valid(lint_goal_text(retune_text, scorecard.get("mode", DEFAULT_MODE)))
     retune_path = write_text(run_dir(root_path, run_id) / "retune_goal.md", retune_text)
     return {"report": report_path, "retune": retune_path}
+
+
+def _split_retune_revision(run_id: str) -> tuple[str, int]:
+    match = re.match(r"^(?P<base>.+)-r(?P<revision>[2-9][0-9]*)$", run_id)
+    if not match:
+        return run_id, 0
+    return match.group("base"), int(match.group("revision")) - 1
+
+
+def _next_retune_run_id(root: Path, run_id: str) -> tuple[str, int]:
+    base, depth = _split_retune_revision(run_id)
+    next_revision = depth + 2
+    while True:
+        candidate = f"{base}-r{next_revision}"
+        if not taskpack_dir(root, candidate).exists():
+            return candidate, next_revision - 1
+        next_revision += 1
+
+
+def _retune_results(scorecard: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    results = scorecard.get("results", [])
+    if not isinstance(results, list):
+        return [], []
+    retune = [
+        result
+        for result in results
+        if isinstance(result, dict) and result.get("status") in RETUNE_STATUSES and result.get("criterion_id")
+    ]
+    passed = [
+        result
+        for result in results
+        if isinstance(result, dict) and result.get("status") == "pass" and result.get("criterion_id")
+    ]
+    return retune, passed
+
+
+def apply_retune(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    executor: str = DEFAULT_EXECUTOR,
+    dry_run: bool = False,
+    depth_warn: int = 3,
+    new_run_id: str | None = None,
+) -> dict[str, Any]:
+    root_path = Path(root)
+    if not _is_safe_path_segment(run_id):
+        raise ArtifactError([ValidationIssue("$.run_id", "run_id must be a single path-safe segment")])
+    if new_run_id is not None and not _is_safe_path_segment(new_run_id):
+        raise ArtifactError([ValidationIssue("$.new_run_id", "new_run_id must be a single path-safe segment")])
+
+    retune_path = run_dir(root_path, run_id) / "retune_goal.md"
+    scorecard_path = run_dir(root_path, run_id) / "scorecard.json"
+    parent_lock_path = goal_lock_path(root_path, run_id)
+    missing = [str(path) for path in (retune_path, scorecard_path, parent_lock_path) if not path.is_file()]
+    if missing:
+        raise ArtifactError([ValidationIssue("$.retune", "missing retune inputs: " + ", ".join(missing))])
+
+    scorecard = read_json(scorecard_path)
+    assert_valid(validate_scorecard(scorecard))
+    retune_targets, passed_results = _retune_results(scorecard)
+    if not retune_targets:
+        raise ArtifactError([ValidationIssue("$.retune_targets", "scorecard has no failed, partial, or missing_evidence criteria")])
+
+    selected_run_id, retune_depth = (new_run_id, _split_retune_revision(new_run_id)[1]) if new_run_id else _next_retune_run_id(root_path, run_id)
+    assert selected_run_id is not None
+    target_dir = taskpack_dir(root_path, selected_run_id)
+    if target_dir.exists():
+        raise ArtifactError([ValidationIssue("$.new_run_id", f"taskpack already exists: {selected_run_id}")])
+
+    active_mode = scorecard.get("mode") if isinstance(scorecard.get("mode"), str) else mode
+    if active_mode not in MODE_CRITERIA_RANGE:
+        active_mode = mode
+    brief = read_json(intent_path(root_path))
+    matrix = read_json(matrix_path(root_path))
+    goal_text = retune_path.read_text(encoding="utf-8")
+    assert_valid(lint_goal_text(goal_text, active_mode))
+    lock = build_goal_lock(brief, matrix, goal_text, executor, active_mode, selected_run_id)
+    lock.update(
+        {
+            "parent_run_id": run_id,
+            "retune_depth": retune_depth,
+            "preserved_pass_criteria": [str(result["criterion_id"]) for result in passed_results],
+            "retune_targets": [str(result["criterion_id"]) for result in retune_targets],
+            "matrix_hash": lock["matrix_sha256"],
+        }
+    )
+
+    adapter_input = base_artifact("rubricodex.adapter_input", mode=active_mode, run_id=selected_run_id)
+    adapter_input.update(
+        {
+            "executor": executor,
+            "brief_path": ".rubricodex/intent/brief.json",
+            "matrix_path": ".rubricodex/matrix/evaluation-matrix.json",
+            "goal_path": f".rubricodex/taskpacks/{selected_run_id}/goal.md",
+            "parent_run_id": run_id,
+        }
+    )
+    warning = None
+    if retune_depth > depth_warn:
+        warning = f"retune depth {retune_depth} exceeds warning threshold {depth_warn}"
+    result = {
+        "status": "pass",
+        "run_id": run_id,
+        "new_run_id": selected_run_id,
+        "retune_depth": retune_depth,
+        "preserved_pass_criteria": lock["preserved_pass_criteria"],
+        "retune_targets": lock["retune_targets"],
+        "dry_run": dry_run,
+        "warning": warning,
+        "paths": {
+            "goal": str(target_dir / "goal.md"),
+            "adapter_input": str(target_dir / "adapter-input.json"),
+            "lock": str(target_dir / "goal.lock.json"),
+        },
+    }
+    if dry_run:
+        return result
+
+    write_text(target_dir / "goal.md", goal_text)
+    write_json(target_dir / "adapter-input.json", adapter_input)
+    write_json(target_dir / "goal.lock.json", lock)
+    lint_goal_file(root_path, selected_run_id, mode=active_mode)
+    return result
 
 
 def _find_app_session_for_run(root: Path, run_id: str) -> tuple[dict[str, Any], Path]:
