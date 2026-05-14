@@ -325,7 +325,7 @@ class RubricodexContractTests(unittest.TestCase):
         for value in ("C-01", "C 01"):
             with self.subTest(value=value):
                 self.assertTrue(pattern.fullmatch(value))
-        for value in (" C-01", "C-01 ", "../../escaped", ".", "..", " "):
+        for value in (" C-01", "C-01 ", "../../escaped", ".", "..", " ", "C-\x00"):
             with self.subTest(value=value):
                 self.assertFalse(pattern.fullmatch(value))
 
@@ -747,6 +747,14 @@ class RubricodexContractTests(unittest.TestCase):
     def test_matrix_path_unsafe_criterion_id_fails(self) -> None:
         matrix = sample_matrix()
         matrix["criteria"][0]["id"] = "../../escaped"
+
+        issues = validate_matrix(matrix)
+
+        self.assertIn("$.criteria[0].id", {issue.path for issue in issues})
+
+    def test_matrix_control_character_criterion_id_fails(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][0]["id"] = "C-\x00"
 
         issues = validate_matrix(matrix)
 
@@ -2502,6 +2510,25 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("$.goal.retune_scope.preserved_pass_criteria.C-01", str(context.exception.issues))
         self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
 
+    def test_retune_apply_rejects_target_in_exclude(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        text = retune_path.read_text(encoding="utf-8")
+        retune_path.write_text(
+            text.replace("## Working rules\n", "  - C-05 Maintainability\n## Working rules\n", 1),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.exclude.C-05", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
     def test_retune_apply_rejects_scorecard_missing_current_matrix_criteria(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -2636,6 +2663,26 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertFalse(result["revision_approved"])
         self.assertIn("$.goal.retune_scope.preserved_pass_criteria.C-01", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_target_in_exclude(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        text = goal_path.read_text(encoding="utf-8")
+        goal_path.write_text(
+            text.replace("## Working rules\n", "  - C-05 Maintainability\n## Working rules\n", 1),
+            encoding="utf-8",
+        )
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.exclude.C-05", str(result["issues"]))
 
     def test_retune_lock_revision_preserves_retune_metadata(self) -> None:
         matrix = self.write_default_contract()

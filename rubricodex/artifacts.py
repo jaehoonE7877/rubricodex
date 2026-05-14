@@ -1234,6 +1234,7 @@ def _is_safe_path_segment(value: str) -> bool:
         and value not in {".", ".."}
         and "/" not in value
         and "\\" not in value
+        and all(char.isprintable() for char in value)
     )
 
 
@@ -1553,6 +1554,9 @@ def validate_matrix_lock(
             )
 
     include_text = _section_content(goal_text, "Include") or ""
+    exclude_text = _section_content(goal_text, "Exclude") or ""
+    working_rules_text = _section_content(goal_text, "Working rules") or ""
+    preservation_text = "\n".join(part for part in (exclude_text, working_rules_text) if part)
     evaluation_text = _section_content(goal_text, "Evaluation") or ""
     retune_targets = lock.get("retune_targets")
     retune_target_ids = (
@@ -1581,6 +1585,13 @@ def validate_matrix_lock(
                     f"retune target missing from Include: {criterion_id}",
                 )
             )
+        if _section_has_criterion_marker(preservation_text, criterion_id):
+            issues.append(
+                ValidationIssue(
+                    f"$.goal.exclude.{criterion_id}",
+                    f"retune target included in preserved scope: {criterion_id}",
+                )
+            )
     if retune_target_ids or preserved_ids:
         missing_retune_scope = sorted(set(current_criteria) - (set(retune_target_ids) | set(preserved_ids)))
         if missing_retune_scope:
@@ -1596,9 +1607,6 @@ def validate_matrix_lock(
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
 
     if preserved_ids:
-        exclude_text = _section_content(goal_text, "Exclude") or ""
-        working_rules_text = _section_content(goal_text, "Working rules") or ""
-        preservation_text = "\n".join(part for part in (exclude_text, working_rules_text) if part)
         current_fingerprints = {
             str(item.get("id")): item
             for item in criteria_fingerprint({"criteria": list(current_criteria.values())})
@@ -1654,6 +1662,7 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "retune lock missing current matrix criteria",
             "retune target missing from current matrix",
             "retune target missing from Include",
+            "retune target included in preserved scope",
             "preserved pass criterion included in retune scope",
         )
     )
