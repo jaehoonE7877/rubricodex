@@ -2199,7 +2199,8 @@ def sketch_evidence(
     matrix = read_json(matrix_path(root_path))
     assert_valid(validate_matrix(matrix, mode))
 
-    normalized_changed = [path.strip() for path in (changed_files or _summarize_changed_files(root_path)) if path.strip()]
+    changed_candidates = _summarize_changed_files(root_path) if changed_files is None else changed_files
+    normalized_changed = [path.strip() for path in changed_candidates if path.strip()]
     if not normalized_changed:
         raise ArtifactError([ValidationIssue("$.changed_files", "evidence sketch requires at least one changed file")])
 

@@ -4,6 +4,7 @@ import os
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -1504,6 +1505,8 @@ class RubricodexContractTests(unittest.TestCase):
         self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
         lint_goal_file(self.root, "example-v0.1")
+        subprocess.run(["git", "init"], cwd=self.root, capture_output=True, check=False)
+        (self.root / "dirty.py").write_text("changed", encoding="utf-8")
 
         with self.assertRaises(ArtifactError) as context:
             sketch_evidence(self.root, "example-v0.1", changed_files=[])
