@@ -731,6 +731,14 @@ class RubricodexContractTests(unittest.TestCase):
         matrix["criteria"][1]["id"] = matrix["criteria"][0]["id"]
         self.assertTrue(validate_matrix(matrix))
 
+    def test_matrix_path_unsafe_criterion_id_fails(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][0]["id"] = "../../escaped"
+
+        issues = validate_matrix(matrix)
+
+        self.assertIn("$.criteria[0].id", {issue.path for issue in issues})
+
     def test_matrix_missing_evidence_required_fails(self) -> None:
         matrix = sample_matrix()
         matrix["criteria"][0]["evidence_required"] = []
@@ -823,6 +831,27 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["matrix_source"], "codex-subagent")
         self.assertIs(matrix["criteria"][0]["hard_gate"], True)
         self.assertIs(matrix["criteria"][1]["hard_gate"], False)
+
+    def test_plan_draft_propose_rewrites_path_unsafe_criterion_id(self) -> None:
+        def proposer(**_: object) -> dict:
+            matrix = sample_matrix(count=4)
+            matrix["criteria"][0]["id"] = "../../escaped"
+            return matrix
+
+        result = draft_harness(
+            self.root,
+            "safe-ids",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+        plan_probes(self.root, "safe-ids", include_supporting=True)
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["matrix_source"], "codex-subagent")
+        self.assertEqual(matrix["criteria"][0]["id"], "C-01")
+        self.assertFalse((taskpack_dir(self.root, "escaped.md")).exists())
 
     def test_plan_draft_propose_falls_back_when_subagent_output_invalid(self) -> None:
         def proposer(**_: object) -> dict:
@@ -1352,6 +1381,15 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["evidence_items"][0]["criterion_id"] = "C-999"
         self.assertTrue(validate_evidence(evidence, matrix))
 
+    def test_evidence_missing_status_fails(self) -> None:
+        matrix = sample_matrix()
+        evidence = sample_evidence(matrix)
+        evidence["evidence_items"][0].pop("status")
+
+        issues = validate_evidence(evidence, matrix)
+
+        self.assertIn("$.evidence_items[0].status", {issue.path for issue in issues})
+
     def test_evidence_sketch_writes_draft_without_promoting_by_default(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -1387,6 +1425,28 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertTrue(evidence_path.is_file())
         self.assertEqual(validate_evidence(read_json(evidence_path), matrix), [])
+
+    def test_evidence_sketch_missing_status_falls_back_to_partial(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        sketch = sample_evidence(matrix)
+        sketch["evidence_items"][0].pop("status")
+
+        result = sketch_evidence(
+            self.root,
+            "example-v0.1",
+            changed_files=["rubricodex/artifacts.py"],
+            review_decision="yes",
+            sketch_runner=lambda **_: sketch,
+        )
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        evidence = read_json(run_dir(self.root, "example-v0.1") / "evidence.json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["sketch_source"], "deterministic-fallback")
+        self.assertEqual(evidence["evidence_items"][0]["status"], "partial")
+        self.assertEqual(scorecard["decision"], "needs_retune")
 
     def test_evidence_sketch_requires_changed_files(self) -> None:
         self.write_default_contract()

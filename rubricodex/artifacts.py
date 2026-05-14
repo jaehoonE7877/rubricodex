@@ -740,7 +740,7 @@ Rules:
 
 def _coerce_criterion(index: int, criterion: dict[str, Any]) -> dict[str, Any]:
     criterion_id = str(criterion.get("id") or f"C-{index:02d}").strip()
-    if not criterion_id:
+    if not criterion_id or not _is_safe_path_segment(criterion_id):
         criterion_id = f"C-{index:02d}"
     evidence_required = criterion.get("evidence_required")
     if not isinstance(evidence_required, list):
@@ -1041,6 +1041,8 @@ def validate_matrix(data: dict[str, Any], mode: str | None = None) -> list[Valid
         criterion_id = criterion.get("id")
         if not isinstance(criterion_id, str) or not criterion_id.strip():
             issues.append(ValidationIssue(f"{path}.id", "criterion id is required"))
+        elif not _is_safe_path_segment(criterion_id):
+            issues.append(ValidationIssue(f"{path}.id", "criterion id must be a single path-safe segment"))
         elif criterion_id in seen:
             issues.append(ValidationIssue(f"{path}.id", f"duplicate criterion id {criterion_id}"))
         else:
@@ -1096,7 +1098,7 @@ def validate_evidence(data: dict[str, Any], matrix: dict[str, Any]) -> list[Vali
             issues.append(ValidationIssue(f"{path}.criterion_id", f"unknown criterion id {criterion_id!r}"))
         if not isinstance(item.get("summary"), str) or not item["summary"].strip():
             issues.append(ValidationIssue(f"{path}.summary", "summary is required"))
-        if item.get("status", "pass") not in STATUS_ORDER:
+        if item.get("status") not in STATUS_ORDER:
             issues.append(ValidationIssue(f"{path}.status", "status must be pass, partial, missing_evidence, or fail"))
         if item.get("artifact_refs") is not None and not isinstance(item["artifact_refs"], list):
             issues.append(ValidationIssue(f"{path}.artifact_refs", "artifact_refs must be a list when present"))
