@@ -2226,6 +2226,20 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result["new_run_id"], "example-v0.1-r3")
 
+    def test_retune_apply_rejects_scorecard_targets_missing_from_matrix(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        matrix["criteria"] = [criterion for criterion in matrix["criteria"] if criterion["id"] != "C-05"]
+        write_json(matrix_path(self.root), matrix)
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.retune_targets", str(context.exception.issues))
+
     def test_retune_lock_blocks_preserved_pass_criteria_changes(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -2240,6 +2254,42 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "fail")
         self.assertIn("V-012", str(result["issues"]))
+
+    def test_retune_lock_rejects_unknown_retune_targets(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r2"))
+        lock["retune_targets"] = ["C-999"]
+        write_json(goal_lock_path(self.root, "example-v0.1-r2"), lock)
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("$.retune_targets.C-999", str(result["issues"]))
+
+    def test_retune_lock_revision_preserves_retune_metadata(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        goal_path.write_text(goal_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve whitespace-only goal refresh")
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r2"))
+
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(result["revision_approved"])
+        self.assertEqual(lock["parent_run_id"], "example-v0.1")
+        self.assertEqual(lock["retune_targets"], ["C-05"])
+        self.assertIn("C-01", lock["preserved_pass_criteria"])
+        self.assertEqual(lock["matrix_hash"], lock["matrix_sha256"])
 
     def test_report_handles_legacy_scorecard_without_reason(self) -> None:
         matrix = self.write_default_contract()

@@ -193,6 +193,12 @@ STATUS_ORDER = {
 RETUNE_STATUSES = {"partial", "missing_evidence", "fail"}
 LIGHT_LOCK_MODES = {"micro", "quick"}
 REVIEW_AUTO_ACCEPT_MODES = {"micro", "quick"}
+RETUNE_LOCK_METADATA_KEYS = (
+    "parent_run_id",
+    "retune_depth",
+    "preserved_pass_criteria",
+    "retune_targets",
+)
 
 
 @dataclass(frozen=True)
@@ -1532,11 +1538,20 @@ def validate_matrix_lock(
 
     evaluation_text = _section_content(goal_text, "Evaluation") or ""
     retune_targets = lock.get("retune_targets")
-    goal_required_criteria = (
+    retune_target_ids = (
         [str(item) for item in retune_targets if str(item).strip()]
         if isinstance(retune_targets, list) and retune_targets
-        else list(current_criteria)
+        else []
     )
+    for criterion_id in retune_target_ids:
+        if criterion_id not in current_criteria:
+            issues.append(
+                ValidationIssue(
+                    f"$.retune_targets.{criterion_id}",
+                    f"retune target missing from current matrix: {criterion_id}",
+                )
+            )
+    goal_required_criteria = retune_target_ids or list(current_criteria)
     for criterion_id in goal_required_criteria:
         if criterion_id not in evaluation_text:
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
@@ -1577,8 +1592,18 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "evidence_required was removed",
             "goal.md is missing criterion",
             "V-012 preserved pass criterion changed",
+            "retune target missing from current matrix",
         )
     )
+
+
+def _preserve_retune_lock_metadata(source: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    for key in RETUNE_LOCK_METADATA_KEYS:
+        if key in source:
+            target[key] = source[key]
+    if "matrix_hash" in source:
+        target["matrix_hash"] = target["matrix_sha256"]
+    return target
 
 
 def verify_matrix_lock(
@@ -1610,6 +1635,7 @@ def verify_matrix_lock(
     if errors and revision_reason and not any(_is_unsafe_lock_issue(issue) for issue in errors):
         executor = str(lock.get("executor", DEFAULT_EXECUTOR))
         updated_lock = build_goal_lock(brief, matrix, goal_text, executor, mode, run_id, revision_reason)
+        updated_lock = _preserve_retune_lock_metadata(lock, updated_lock)
         write_json(lock_path, updated_lock)
         issues = []
         errors = []
@@ -2521,6 +2547,30 @@ def apply_retune(
         active_mode = mode
     brief = read_json(intent_path(root_path))
     matrix = read_json(matrix_path(root_path))
+    assert_valid(validate_matrix(matrix, active_mode))
+    current_criteria = _current_criteria_by_id(matrix)
+    retune_target_ids = [str(result["criterion_id"]) for result in retune_targets]
+    missing_retune_targets = sorted(criterion_id for criterion_id in retune_target_ids if criterion_id not in current_criteria)
+    if missing_retune_targets:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.retune_targets",
+                    "retune targets missing from current matrix: " + ", ".join(missing_retune_targets),
+                )
+            ]
+        )
+    preserved_pass_ids = [str(result["criterion_id"]) for result in passed_results]
+    missing_preserved = sorted(criterion_id for criterion_id in preserved_pass_ids if criterion_id not in current_criteria)
+    if missing_preserved:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.preserved_pass_criteria",
+                    "preserved pass criteria missing from current matrix: " + ", ".join(missing_preserved),
+                )
+            ]
+        )
     goal_text = retune_path.read_text(encoding="utf-8")
     assert_valid(lint_goal_text(goal_text, active_mode))
     lock = build_goal_lock(brief, matrix, goal_text, executor, active_mode, selected_run_id)
@@ -2528,8 +2578,8 @@ def apply_retune(
         {
             "parent_run_id": run_id,
             "retune_depth": retune_depth,
-            "preserved_pass_criteria": [str(result["criterion_id"]) for result in passed_results],
-            "retune_targets": [str(result["criterion_id"]) for result in retune_targets],
+            "preserved_pass_criteria": preserved_pass_ids,
+            "retune_targets": retune_target_ids,
             "matrix_hash": lock["matrix_sha256"],
         }
     )
