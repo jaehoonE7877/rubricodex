@@ -2508,6 +2508,41 @@ def _retune_results(scorecard: dict[str, Any]) -> tuple[list[dict[str, Any]], li
     return retune, passed
 
 
+def _child_retune_goal_text(parent_goal_text: str, parent_run_id: str, child_run_id: str) -> str:
+    lines: list[str] = []
+    parent_context_added = False
+    for line in parent_goal_text.splitlines():
+        if line.startswith(f"/goal Retune Rubricodex run {parent_run_id} "):
+            lines.append(line.replace(f"run {parent_run_id}", f"run {child_run_id}", 1))
+            continue
+        if line == f"- Run id: {parent_run_id}":
+            lines.append(f"- Run id: {child_run_id}")
+            lines.append(f"- Parent run id: {parent_run_id}")
+            parent_context_added = True
+            continue
+        lines.append(line)
+    if not parent_context_added:
+        lines.append(f"- Parent run id: {parent_run_id}")
+    return "\n".join(lines) + "\n"
+
+
+def _parent_lock_issues(result: dict[str, Any]) -> list[ValidationIssue]:
+    issues = [ValidationIssue("$.parent_lock", "parent matrix lock must pass before retune apply")]
+    for issue in result.get("issues", []):
+        if not isinstance(issue, dict):
+            continue
+        path = str(issue.get("path") or "$")
+        suffix = path[1:] if path.startswith("$") else f".{path}"
+        issues.append(
+            ValidationIssue(
+                f"$.parent_lock{suffix}",
+                str(issue.get("message") or "parent lock issue"),
+                str(issue.get("severity") or "error"),
+            )
+        )
+    return issues
+
+
 def apply_retune(
     root: Path | str,
     run_id: str,
@@ -2532,6 +2567,12 @@ def apply_retune(
 
     scorecard = read_json(scorecard_path)
     assert_valid(validate_scorecard(scorecard))
+    active_mode = scorecard.get("mode") if isinstance(scorecard.get("mode"), str) else mode
+    if active_mode not in MODE_CRITERIA_RANGE:
+        active_mode = mode
+    parent_lock = verify_matrix_lock(root_path, run_id, mode=active_mode)
+    if parent_lock["status"] != "pass":
+        raise ArtifactError(_parent_lock_issues(parent_lock))
     retune_targets, passed_results = _retune_results(scorecard)
     if not retune_targets:
         raise ArtifactError([ValidationIssue("$.retune_targets", "scorecard has no failed, partial, or missing_evidence criteria")])
@@ -2542,9 +2583,6 @@ def apply_retune(
     if target_dir.exists():
         raise ArtifactError([ValidationIssue("$.new_run_id", f"taskpack already exists: {selected_run_id}")])
 
-    active_mode = scorecard.get("mode") if isinstance(scorecard.get("mode"), str) else mode
-    if active_mode not in MODE_CRITERIA_RANGE:
-        active_mode = mode
     brief = read_json(intent_path(root_path))
     matrix = read_json(matrix_path(root_path))
     assert_valid(validate_matrix(matrix, active_mode))
@@ -2571,7 +2609,7 @@ def apply_retune(
                 )
             ]
         )
-    goal_text = retune_path.read_text(encoding="utf-8")
+    goal_text = _child_retune_goal_text(retune_path.read_text(encoding="utf-8"), run_id, selected_run_id)
     assert_valid(lint_goal_text(goal_text, active_mode))
     lock = build_goal_lock(brief, matrix, goal_text, executor, active_mode, selected_run_id)
     lock.update(

@@ -2189,6 +2189,10 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(lock["retune_depth"], 1)
         self.assertEqual(lock["retune_targets"], ["C-05"])
         self.assertIn("C-01", lock["preserved_pass_criteria"])
+        child_goal = (taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").read_text(encoding="utf-8")
+        self.assertIn("/goal Retune Rubricodex run example-v0.1-r2", child_goal)
+        self.assertIn("- Run id: example-v0.1-r2", child_goal)
+        self.assertIn("- Parent run id: example-v0.1", child_goal)
         self.assertEqual(verify_matrix_lock(self.root, "example-v0.1-r2")["status"], "pass")
 
     def test_cli_retune_apply_command(self) -> None:
@@ -2234,11 +2238,29 @@ class RubricodexContractTests(unittest.TestCase):
         write_report(self.root, "example-v0.1")
         matrix["criteria"] = [criterion for criterion in matrix["criteria"] if criterion["id"] != "C-05"]
         write_json(matrix_path(self.root), matrix)
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "pass")
 
         with self.assertRaises(ArtifactError) as context:
             apply_retune(self.root, "example-v0.1")
 
         self.assertIn("$.retune_targets", str(context.exception.issues))
+
+    def test_retune_apply_rejects_parent_lock_drift(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        matrix["criteria"][0]["evidence_required"] = ["changed evidence"]
+        write_json(matrix_path(self.root), matrix)
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "fail")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.parent_lock", str(context.exception.issues))
 
     def test_retune_lock_blocks_preserved_pass_criteria_changes(self) -> None:
         matrix = self.write_default_contract()
