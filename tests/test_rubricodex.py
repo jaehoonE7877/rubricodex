@@ -2230,6 +2230,32 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertEqual(result["new_run_id"], "example-v0.1-r3")
 
+    def test_retune_apply_continues_two_digit_revision_ids(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1-r10")
+        write_json(run_dir(self.root, "example-v0.1-r10") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1-r10")
+        write_report(self.root, "example-v0.1-r10")
+
+        result = apply_retune(self.root, "example-v0.1-r10")
+
+        self.assertEqual(result["new_run_id"], "example-v0.1-r11")
+        self.assertEqual(result["retune_depth"], 10)
+
+    def test_retune_apply_custom_new_run_id_increments_parent_depth(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1", new_run_id="fix-payment-retune")
+
+        lock = read_json(goal_lock_path(self.root, "fix-payment-retune"))
+        self.assertEqual(result["new_run_id"], "fix-payment-retune")
+        self.assertEqual(result["retune_depth"], 1)
+        self.assertEqual(lock["retune_depth"], 1)
+
     def test_retune_apply_rejects_scorecard_targets_missing_from_matrix(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")

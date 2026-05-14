@@ -2475,19 +2475,30 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
 
 
 def _split_retune_revision(run_id: str) -> tuple[str, int]:
-    match = re.match(r"^(?P<base>.+)-r(?P<revision>[2-9][0-9]*)$", run_id)
+    match = re.match(r"^(?P<base>.+)-r(?P<revision>[1-9][0-9]*)$", run_id)
     if not match:
         return run_id, 0
-    return match.group("base"), int(match.group("revision")) - 1
+    revision = int(match.group("revision"))
+    if revision < 2:
+        return run_id, 0
+    return match.group("base"), revision - 1
 
 
-def _next_retune_run_id(root: Path, run_id: str) -> tuple[str, int]:
-    base, depth = _split_retune_revision(run_id)
-    next_revision = depth + 2
+def _parent_retune_depth(lock: dict[str, Any], run_id: str) -> int:
+    depth = lock.get("retune_depth")
+    if isinstance(depth, int) and depth >= 0:
+        return depth
+    return _split_retune_revision(run_id)[1]
+
+
+def _next_retune_run_id(root: Path, run_id: str, parent_depth: int | None = None) -> tuple[str, int]:
+    base, suffix_depth = _split_retune_revision(run_id)
+    next_revision = suffix_depth + 2
+    next_depth = (parent_depth if parent_depth is not None else suffix_depth) + 1
     while True:
         candidate = f"{base}-r{next_revision}"
         if not taskpack_dir(root, candidate).exists():
-            return candidate, next_revision - 1
+            return candidate, next_depth
         next_revision += 1
 
 
@@ -2577,7 +2588,11 @@ def apply_retune(
     if not retune_targets:
         raise ArtifactError([ValidationIssue("$.retune_targets", "scorecard has no failed, partial, or missing_evidence criteria")])
 
-    selected_run_id, retune_depth = (new_run_id, _split_retune_revision(new_run_id)[1]) if new_run_id else _next_retune_run_id(root_path, run_id)
+    parent_lock_data = read_json(parent_lock_path)
+    parent_depth = _parent_retune_depth(parent_lock_data, run_id)
+    selected_run_id, retune_depth = (
+        (new_run_id, parent_depth + 1) if new_run_id else _next_retune_run_id(root_path, run_id, parent_depth)
+    )
     assert selected_run_id is not None
     target_dir = taskpack_dir(root_path, selected_run_id)
     if target_dir.exists():
