@@ -1552,6 +1552,7 @@ def validate_matrix_lock(
                 )
             )
 
+    include_text = _section_content(goal_text, "Include") or ""
     evaluation_text = _section_content(goal_text, "Evaluation") or ""
     retune_targets = lock.get("retune_targets")
     retune_target_ids = (
@@ -1571,6 +1572,13 @@ def validate_matrix_lock(
                 ValidationIssue(
                     f"$.retune_targets.{criterion_id}",
                     f"retune target missing from current matrix: {criterion_id}",
+                )
+            )
+        if not _section_has_criterion_marker(include_text, criterion_id):
+            issues.append(
+                ValidationIssue(
+                    f"$.goal.include.{criterion_id}",
+                    f"retune target missing from Include: {criterion_id}",
                 )
             )
     if retune_target_ids or preserved_ids:
