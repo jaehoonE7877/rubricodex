@@ -35,7 +35,9 @@ from rubricodex.artifacts import (
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    apply_retune,
     draft_harness,
+    sketch_evidence,
     goal_lock_path,
     import_app_session,
     init_project,
@@ -770,6 +772,86 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertTrue((self.root / ".rubricodex/taskpacks/draft-strict/goal.md").is_file())
         self.assertEqual(lint_goal_file(self.root, "draft-strict", mode="strict")["status"], "pass")
 
+    def test_plan_draft_propose_accepts_valid_subagent_matrix(self) -> None:
+        def proposer(**_: object) -> dict:
+            matrix = sample_matrix()
+            matrix["criteria"][0]["name"] = "Payment idempotency"
+            matrix["criteria"][0]["claim"] = "Duplicate payment webhook events are idempotent."
+            matrix["criteria"][0]["check_question"] = "Does the webhook keep one payment side effect per event id?"
+            return matrix
+
+        result = draft_harness(
+            self.root,
+            "proposed",
+            "결제 webhook 중복 처리를 막고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["matrix_source"], "codex-subagent")
+        self.assertEqual(matrix["criteria"][0]["name"], "Payment idempotency")
+        self.assertNotIn("raw", json.dumps(matrix).lower())
+
+    def test_plan_draft_propose_falls_back_when_subagent_output_invalid(self) -> None:
+        def proposer(**_: object) -> dict:
+            return {"criteria": []}
+
+        result = draft_harness(
+            self.root,
+            "fallback",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["matrix_source"], "deterministic-fallback")
+        self.assertEqual(matrix["criteria"][0]["name"], "Intent alignment")
+
+    def test_plan_draft_review_requires_noninteractive_confirmation_for_standard(self) -> None:
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(
+                self.root,
+                "review-needed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                mode="standard",
+                review=True,
+            )
+
+        self.assertIn("$.review", {issue.path for issue in context.exception.issues})
+        self.assertFalse((taskpack_dir(self.root, "review-needed") / "goal.lock.json").exists())
+
+    def test_plan_draft_review_yes_locks_after_confirmation(self) -> None:
+        result = draft_harness(
+            self.root,
+            "reviewed",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            review=True,
+            review_decision="yes",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["review_status"], "confirmed")
+        self.assertTrue((taskpack_dir(self.root, "reviewed") / "goal.lock.json").is_file())
+
+    def test_plan_draft_review_auto_accepts_micro_mode(self) -> None:
+        result = draft_harness(
+            self.root,
+            "micro-reviewed",
+            "오타 문구 수정",
+            mode="micro",
+            review=True,
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["review_status"], "auto_accepted")
+
     def test_plan_draft_rejects_empty_goal(self) -> None:
         with self.assertRaises(ArtifactError) as context:
             draft_harness(self.root, "empty", " ")
@@ -892,6 +974,34 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn('"mode": "quick"', stdout.getvalue())
         self.assertIn('"status": "pass"', stdout.getvalue())
         self.assertTrue((self.root / ".rubricodex/taskpacks/cli-draft/goal.md").is_file())
+
+    def test_cli_plan_draft_propose_review_yes_uses_fallback_when_codex_fails(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "cli-propose",
+                    "--mode",
+                    "standard",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    "--propose",
+                    "--codex-bin",
+                    "false",
+                    "--review",
+                    "--yes",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        output = stdout.getvalue()
+        self.assertIn('"matrix_source": "deterministic-fallback"', output)
+        self.assertIn('"review_status": "confirmed"', output)
+        self.assertTrue((taskpack_dir(self.root, "cli-propose") / "goal.lock.json").is_file())
 
     def test_cli_plan_draft_honors_global_mode(self) -> None:
         old_cwd = Path.cwd()
@@ -1191,6 +1301,52 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["evidence_items"][0]["criterion_id"] = "C-999"
         self.assertTrue(validate_evidence(evidence, matrix))
 
+    def test_evidence_sketch_writes_draft_without_promoting_by_default(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = sketch_evidence(
+            self.root,
+            "example-v0.1",
+            changed_files=["rubricodex/artifacts.py", "tests/test_rubricodex.py"],
+            sketch_runner=lambda **_: sample_evidence(matrix),
+        )
+
+        draft_path = run_dir(self.root, "example-v0.1") / "evidence.draft.json"
+        self.assertEqual(result["status"], "needs_confirmation")
+        self.assertTrue(draft_path.is_file())
+        self.assertFalse((run_dir(self.root, "example-v0.1") / "evidence.json").exists())
+        self.assertEqual(validate_evidence(read_json(draft_path), matrix), [])
+
+    def test_evidence_sketch_yes_promotes_confirmed_draft(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = sketch_evidence(
+            self.root,
+            "example-v0.1",
+            changed_files=["rubricodex/artifacts.py"],
+            review_decision="yes",
+            sketch_runner=lambda **_: sample_evidence(matrix),
+        )
+
+        evidence_path = run_dir(self.root, "example-v0.1") / "evidence.json"
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(evidence_path.is_file())
+        self.assertEqual(validate_evidence(read_json(evidence_path), matrix), [])
+
+    def test_evidence_sketch_requires_changed_files(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        with self.assertRaises(ArtifactError) as context:
+            sketch_evidence(self.root, "example-v0.1", changed_files=[])
+
+        self.assertIn("$.changed_files", {issue.path for issue in context.exception.issues})
+
     def test_run_local_requires_prompt_lint_pass(self) -> None:
         self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -1280,6 +1436,32 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("run-manifest.json", output)
         manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
         self.assertEqual(manifest["result_summary"], "Dry-run handoff verified.")
+
+    def test_cli_evidence_sketch_yes_promotes_with_fallback(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "evidence",
+                    "sketch",
+                    "--run-id",
+                    "example-v0.1",
+                    "--changed-file",
+                    "rubricodex/artifacts.py",
+                    "--codex-bin",
+                    "false",
+                    "--yes",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"status": "pass"', stdout.getvalue())
+        self.assertTrue((run_dir(self.root, "example-v0.1") / "evidence.json").is_file())
 
     def test_run_manifest_rejects_raw_output_fields(self) -> None:
         manifest = {
@@ -1989,6 +2171,75 @@ class RubricodexContractTests(unittest.TestCase):
         text = paths["retune"].read_text(encoding="utf-8")
         self.assertEqual(lint_goal_text(text), [])
         self.assertLess(len(text), 2400)
+
+    def test_retune_apply_creates_next_taskpack_with_preserved_passes(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r2"))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["new_run_id"], "example-v0.1-r2")
+        self.assertTrue((taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").is_file())
+        self.assertEqual(lock["parent_run_id"], "example-v0.1")
+        self.assertEqual(lock["retune_depth"], 1)
+        self.assertEqual(lock["retune_targets"], ["C-05"])
+        self.assertIn("C-01", lock["preserved_pass_criteria"])
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1-r2")["status"], "pass")
+
+    def test_cli_retune_apply_command(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "retune",
+                    "apply",
+                    "--run-id",
+                    "example-v0.1",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"new_run_id": "example-v0.1-r2"', stdout.getvalue())
+        self.assertTrue((taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").is_file())
+
+    def test_retune_apply_uses_next_available_revision_id(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        self.assertEqual(result["new_run_id"], "example-v0.1-r3")
+
+    def test_retune_lock_blocks_preserved_pass_criteria_changes(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        matrix["criteria"][0]["evidence_required"] = ["weakened evidence"]
+        write_json(matrix_path(self.root), matrix)
+        result = verify_matrix_lock(self.root, "example-v0.1-r2")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("V-012", str(result["issues"]))
 
     def test_report_handles_legacy_scorecard_without_reason(self) -> None:
         matrix = self.write_default_contract()
