@@ -2335,6 +2335,54 @@ def _criterion_reason(criterion: dict[str, Any], status: str, items: list[dict[s
     return reason
 
 
+def _inherit_preserved_parent_evidence(
+    root_path: Path,
+    run_id: str,
+    matrix: dict[str, Any],
+    items_by_criterion: dict[str, list[dict[str, Any]]],
+) -> None:
+    lock_file = goal_lock_path(root_path, run_id)
+    if not lock_file.is_file():
+        return
+
+    lock = read_json(lock_file)
+    parent_run_id = lock.get("parent_run_id")
+    preserved = lock.get("preserved_pass_criteria")
+    if not isinstance(parent_run_id, str) or not parent_run_id.strip() or not isinstance(preserved, list):
+        return
+
+    missing_preserved_ids = [
+        str(criterion_id)
+        for criterion_id in preserved
+        if str(criterion_id).strip() and str(criterion_id) not in items_by_criterion
+    ]
+    if not missing_preserved_ids:
+        return
+
+    parent_evidence_file = run_dir(root_path, parent_run_id) / "evidence.json"
+    if not parent_evidence_file.is_file():
+        return
+    parent_evidence = read_json(parent_evidence_file)
+    assert_valid(validate_evidence(parent_evidence, matrix))
+
+    parent_items: dict[str, list[dict[str, Any]]] = {}
+    for item in parent_evidence["evidence_items"]:
+        if item.get("status") == "pass":
+            parent_items.setdefault(str(item["criterion_id"]), []).append(item)
+
+    for criterion_id in missing_preserved_ids:
+        inherited_items = []
+        for item in parent_items.get(criterion_id, []):
+            summary = str(item.get("summary") or "").strip()
+            inherited = dict(item)
+            inherited["summary"] = f"Inherited pass evidence from parent run {parent_run_id}: {summary}"
+            inherited["status"] = "pass"
+            inherited["inherited_from_run"] = parent_run_id
+            inherited_items.append(inherited)
+        if inherited_items:
+            items_by_criterion[criterion_id] = inherited_items
+
+
 def compute_scorecard(
     root: Path | str,
     run_id: str,
@@ -2350,6 +2398,7 @@ def compute_scorecard(
     items_by_criterion: dict[str, list[dict[str, Any]]] = {}
     for item in evidence["evidence_items"]:
         items_by_criterion.setdefault(item["criterion_id"], []).append(item)
+    _inherit_preserved_parent_evidence(root_path, run_id, matrix, items_by_criterion)
 
     counts = {"pass": 0, "partial": 0, "missing_evidence": 0, "fail": 0}
     results: list[dict[str, Any]] = []

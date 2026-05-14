@@ -2378,6 +2378,27 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("- Parent run id: example-v0.1", child_goal)
         self.assertEqual(verify_matrix_lock(self.root, "example-v0.1-r2")["status"], "pass")
 
+    def test_retune_child_scorecard_inherits_preserved_parent_pass_evidence(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        child_evidence = sample_evidence(matrix, {"C-05": "pass"}, run_id="example-v0.1-r2")
+        child_evidence["evidence_items"] = [
+            item for item in child_evidence["evidence_items"] if item["criterion_id"] == "C-05"
+        ]
+        write_json(run_dir(self.root, "example-v0.1-r2") / "evidence.json", child_evidence)
+
+        scorecard = compute_scorecard(self.root, "example-v0.1-r2")
+
+        self.assertEqual(scorecard["decision"], "pass")
+        self.assertEqual(scorecard["counts"], {"pass": 5, "partial": 0, "missing_evidence": 0, "fail": 0})
+        inherited = next(result for result in scorecard["results"] if result["criterion_id"] == "C-01")
+        self.assertIn("Inherited pass evidence from parent run example-v0.1", inherited["reason"])
+
     def test_cli_retune_apply_command(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
