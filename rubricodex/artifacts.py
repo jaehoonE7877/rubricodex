@@ -1472,6 +1472,11 @@ def _current_criteria_by_id(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]
     }
 
 
+def _section_has_criterion_marker(section: str, criterion_id: str) -> bool:
+    pattern = rf"(^|\n)\s*-\s*{re.escape(criterion_id)}(?=[:\s(-])"
+    return re.search(pattern, section) is not None
+
+
 def validate_matrix_lock(
     lock: dict[str, Any],
     brief: dict[str, Any],
@@ -1553,7 +1558,7 @@ def validate_matrix_lock(
             )
     goal_required_criteria = retune_target_ids or list(current_criteria)
     for criterion_id in goal_required_criteria:
-        if criterion_id not in evaluation_text:
+        if not _section_has_criterion_marker(evaluation_text, criterion_id):
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
 
     preserved = lock.get("preserved_pass_criteria")
@@ -2636,6 +2641,10 @@ def apply_retune(
             "matrix_hash": lock["matrix_sha256"],
         }
     )
+    lock_issues = validate_matrix_lock(lock, brief, matrix, goal_text, active_mode)
+    lock_errors = [issue for issue in lock_issues if issue.severity == "error"]
+    if lock_errors:
+        raise ArtifactError(lock_errors)
 
     adapter_input = base_artifact("rubricodex.adapter_input", mode=active_mode, run_id=selected_run_id)
     adapter_input.update(

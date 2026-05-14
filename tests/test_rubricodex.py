@@ -2273,6 +2273,22 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertIn("$.retune_targets", str(context.exception.issues))
 
+    def test_retune_apply_rejects_stale_retune_goal_missing_target(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        text = retune_path.read_text(encoding="utf-8")
+        retune_path.write_text(text.replace("- C-05", "- C-99"), encoding="utf-8")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.C-05", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
     def test_retune_apply_rejects_parent_lock_drift(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
