@@ -2347,6 +2347,24 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("$.goal.C-05", str(context.exception.issues))
         self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
 
+    def test_retune_apply_rejects_scorecard_missing_current_matrix_criteria(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        matrix["criteria"].append(criterion(6))
+        write_json(matrix_path(self.root), matrix)
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "pass")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.scorecard.results", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
     def test_retune_apply_rejects_parent_lock_drift(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1")

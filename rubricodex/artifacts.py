@@ -2628,6 +2628,17 @@ def apply_retune(
             ]
         )
     preserved_pass_ids = [str(result["criterion_id"]) for result in passed_results]
+    scorecard_criterion_ids = set(retune_target_ids) | set(preserved_pass_ids)
+    missing_scorecard_results = sorted(set(current_criteria) - scorecard_criterion_ids)
+    if missing_scorecard_results:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.scorecard.results",
+                    "scorecard results missing current matrix criteria: " + ", ".join(missing_scorecard_results),
+                )
+            ]
+        )
     missing_preserved = sorted(criterion_id for criterion_id in preserved_pass_ids if criterion_id not in current_criteria)
     if missing_preserved:
         raise ArtifactError(
