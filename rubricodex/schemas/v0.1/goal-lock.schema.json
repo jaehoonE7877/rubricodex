@@ -15,6 +15,11 @@
     "matrix_sha256": { "type": "string", "minLength": 1 },
     "goal_sha256": { "type": "string", "minLength": 1 },
     "locked_scope": { "type": "object" },
-    "locked_criteria": { "type": "array" }
+    "locked_criteria": { "type": "array" },
+    "parent_run_id": { "type": "string", "minLength": 1 },
+    "retune_depth": { "type": "integer", "minimum": 0 },
+    "preserved_pass_criteria": { "type": "array", "items": { "type": "string" } },
+    "retune_targets": { "type": "array", "items": { "type": "string" } },
+    "matrix_hash": { "type": "string", "minLength": 1 }
   }
 }

@@ -416,8 +416,9 @@ def build_parser() -> argparse.ArgumentParser:
     plan_draft.add_argument("--propose-timeout", type=int, default=60)
     plan_draft.add_argument("--codex-bin", default="codex")
     plan_draft.add_argument("--review", action="store_true", help="Require matrix confirmation before locking")
-    plan_draft.add_argument("--yes", action="store_true", help="Confirm review prompts non-interactively")
-    plan_draft.add_argument("--no", action="store_true", help="Reject review prompts non-interactively")
+    plan_review = plan_draft.add_mutually_exclusive_group()
+    plan_review.add_argument("--yes", action="store_true", help="Confirm review prompts non-interactively")
+    plan_review.add_argument("--no", action="store_true", help="Reject review prompts non-interactively")
     plan_draft.set_defaults(func=cmd_plan_draft)
 
     intent = subparsers.add_parser("intent")
@@ -474,8 +475,9 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_sketch.add_argument("--changed-file", action="append")
     evidence_sketch.add_argument("--sketch-timeout", type=int, default=60)
     evidence_sketch.add_argument("--codex-bin", default="codex")
-    evidence_sketch.add_argument("--yes", action="store_true")
-    evidence_sketch.add_argument("--no", action="store_true")
+    evidence_review = evidence_sketch.add_mutually_exclusive_group()
+    evidence_review.add_argument("--yes", action="store_true")
+    evidence_review.add_argument("--no", action="store_true")
     evidence_sketch.set_defaults(func=cmd_evidence_sketch)
 
     score = subparsers.add_parser("score")

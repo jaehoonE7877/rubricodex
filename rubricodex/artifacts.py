@@ -750,6 +750,15 @@ def _coerce_criterion(index: int, criterion: dict[str, Any]) -> dict[str, Any]:
         levels = {}
     name = str(criterion.get("name") or f"Criterion {index}").strip()
     claim = str(criterion.get("claim") or f"{name} is satisfied.").strip()
+    hard_gate = criterion.get("hard_gate")
+    if isinstance(hard_gate, str):
+        normalized = hard_gate.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            hard_gate = True
+        elif normalized in {"false", "0", "no"}:
+            hard_gate = False
+    if not isinstance(hard_gate, bool):
+        raise ArtifactError([ValidationIssue(f"$.criteria[{index - 1}].hard_gate", "hard_gate must be boolean")])
     return {
         "id": criterion_id,
         "name": name,
@@ -758,7 +767,7 @@ def _coerce_criterion(index: int, criterion: dict[str, Any]) -> dict[str, Any]:
             criterion.get("check_question") or f"Does {name.lower()} have summarized evidence?"
         ).strip(),
         "evidence_required": [str(item).strip() for item in evidence_required if str(item).strip()],
-        "hard_gate": bool(criterion.get("hard_gate")),
+        "hard_gate": hard_gate,
         "levels": {
             "pass": str(levels.get("pass") or "Summarized evidence proves this criterion.").strip(),
             "partial": str(levels.get("partial") or "Evidence is present but incomplete.").strip(),

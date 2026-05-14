@@ -5,7 +5,7 @@ import json
 import shutil
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
@@ -18,6 +18,7 @@ from rubricodex.artifacts import (
     APP_SESSION_TYPE,
     ArtifactError,
     GOAL_HEADINGS,
+    GOAL_LOCK_TYPE,
     BRIEF_TYPE,
     EVIDENCE_TYPE,
     MATRIX_TYPE,
@@ -293,6 +294,7 @@ class RubricodexContractTests(unittest.TestCase):
         for artifact_type in (
             BRIEF_TYPE,
             MATRIX_TYPE,
+            GOAL_LOCK_TYPE,
             EVIDENCE_TYPE,
             SCORECARD_TYPE,
             RUN_MANIFEST_TYPE,
@@ -307,6 +309,12 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertIn(artifact_type, schemas)
                 self.assertTrue(schema_path(artifact_type).is_file())
                 self.assertEqual(load_schema(artifact_type)["$id"], schemas[artifact_type])
+
+    def test_goal_lock_schema_exposes_retune_metadata(self) -> None:
+        properties = load_schema(GOAL_LOCK_TYPE)["properties"]
+
+        for key in ("parent_run_id", "retune_depth", "preserved_pass_criteria", "retune_targets", "matrix_hash"):
+            self.assertIn(key, properties)
 
     def test_committed_fixture_artifacts_have_schema_coverage(self) -> None:
         schemas = schema_index()
@@ -795,6 +803,27 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(matrix["criteria"][0]["name"], "Payment idempotency")
         self.assertNotIn("raw", json.dumps(matrix).lower())
 
+    def test_plan_draft_propose_parses_string_boolean_hard_gate(self) -> None:
+        def proposer(**_: object) -> dict:
+            matrix = sample_matrix()
+            matrix["criteria"][0]["hard_gate"] = "true"
+            matrix["criteria"][1]["hard_gate"] = "false"
+            return matrix
+
+        result = draft_harness(
+            self.root,
+            "string-booleans",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["matrix_source"], "codex-subagent")
+        self.assertIs(matrix["criteria"][0]["hard_gate"], True)
+        self.assertIs(matrix["criteria"][1]["hard_gate"], False)
+
     def test_plan_draft_propose_falls_back_when_subagent_output_invalid(self) -> None:
         def proposer(**_: object) -> dict:
             return {"criteria": []}
@@ -1002,6 +1031,28 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn('"matrix_source": "deterministic-fallback"', output)
         self.assertIn('"review_status": "confirmed"', output)
         self.assertTrue((taskpack_dir(self.root, "cli-propose") / "goal.lock.json").is_file())
+
+    def test_cli_plan_draft_rejects_conflicting_review_flags(self) -> None:
+        with redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as context:
+                cli_main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "plan",
+                        "draft",
+                        "--run-id",
+                        "conflict",
+                        "--goal",
+                        "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                        "--review",
+                        "--yes",
+                        "--no",
+                    ]
+                )
+
+        self.assertEqual(context.exception.code, 2)
+        self.assertFalse((taskpack_dir(self.root, "conflict") / "goal.lock.json").exists())
 
     def test_cli_plan_draft_honors_global_mode(self) -> None:
         old_cwd = Path.cwd()
@@ -1346,6 +1397,13 @@ class RubricodexContractTests(unittest.TestCase):
             sketch_evidence(self.root, "example-v0.1", changed_files=[])
 
         self.assertIn("$.changed_files", {issue.path for issue in context.exception.issues})
+
+    def test_cli_evidence_sketch_rejects_conflicting_review_flags(self) -> None:
+        with redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as context:
+                cli_main(["evidence", "sketch", "--run-id", "example-v0.1", "--yes", "--no"])
+
+        self.assertEqual(context.exception.code, 2)
 
     def test_run_local_requires_prompt_lint_pass(self) -> None:
         self.write_default_contract()
