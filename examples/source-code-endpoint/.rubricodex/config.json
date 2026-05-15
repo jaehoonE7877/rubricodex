@@ -9,6 +9,6 @@
   "default_executor": "codex-cli-goal",
   "default_mode": "standard",
   "raw_storage_policy": "never_store_raw_transcripts_logs_or_unredacted_command_output",
-  "rubricodex_version": "1.0.2",
+  "rubricodex_version": "1.0.4",
   "schema_version": "rubricodex.v0.1"
 }

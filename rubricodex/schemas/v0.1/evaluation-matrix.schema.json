@@ -18,7 +18,12 @@
         "type": "object",
         "required": ["id", "name", "claim", "check_question", "evidence_required", "hard_gate", "levels", "retune_hint"],
         "properties": {
-          "id": { "type": "string", "minLength": 1 },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "not": { "enum": [".", ".."] },
+            "pattern": "^(?!\\.\\.?$)(?!.*[/\\\\])(?=\\S)(?=.*\\S$)[^\\u0000-\\u001F]+$"
+          },
           "name": { "type": "string", "minLength": 1 },
           "claim": { "type": "string", "minLength": 1 },
           "check_question": { "type": "string", "minLength": 1 },

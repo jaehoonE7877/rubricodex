@@ -111,6 +111,17 @@ rubricodex plan draft \
   --goal "관리자 dashboard page를 만들고 test evidence를 남겨줘."
 ```
 
+v1.0.4에서는 코드 기반 평가표 제안과 고정 전 확인을 함께 켤 수 있습니다.
+
+```bash
+rubricodex plan draft \
+  --run-id example-v1.0 \
+  --goal "관리자 dashboard page를 만들고 test evidence를 남겨줘." \
+  --propose \
+  --review \
+  --yes
+```
+
 설치하지 않은 상태라면 같은 명령을 Python module로 실행합니다.
 
 ```bash
@@ -138,11 +149,11 @@ flowchart LR
 | 단계 | 하는 일 | 결과물 |
 | --- | --- | --- |
 | 1 | 요청을 작고 명확한 목표로 정리 | `brief.json` |
-| 2 | 성공 기준을 표로 고정 | `evaluation-matrix.json` |
+| 2 | 성공 기준을 제안하고 확인 후 고정 | `evaluation-matrix.json` |
 | 3 | Codex가 실행할 목표 파일 생성 | `goal.md` |
-| 4 | 구현 후 검증 근거 정리 | `evidence.json` |
+| 4 | 구현 후 검증 근거 초안·확정 | `evidence.draft.json`, `evidence.json` |
 | 5 | 점수와 리포트 생성 | `scorecard.json`, `report.md` |
-| 6 | 부족하면 다시 시도할 지시 생성 | `retune_goal.md` |
+| 6 | 부족하면 다시 시도할 지시를 새 taskpack으로 발행 | `retune_goal.md`, `taskpacks/<run-id-rN>/goal.md` |
 
 ## 모드 선택
 

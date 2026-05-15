@@ -9,6 +9,7 @@ from .artifacts import (
     DEFAULT_EXECUTOR,
     DEFAULT_MODE,
     ArtifactError,
+    apply_retune,
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
@@ -24,6 +25,7 @@ from .artifacts import (
     run_local,
     run_probes,
     run_dir,
+    sketch_evidence,
     validate_brief,
     validate_evidence,
     validate_app_cards,
@@ -67,6 +69,7 @@ def _global_mode(argv: list[str]) -> str | None:
         "orchestrate",
         "schema",
         "hook",
+        "retune",
     }
     index = 0
     while index < len(argv):
@@ -165,6 +168,7 @@ def cmd_plan_draft(args: argparse.Namespace) -> int:
     mode = args.plan_mode
     if mode == "auto" and args.global_mode and not args.plan_mode_explicit:
         mode = args.global_mode
+    review_decision = "yes" if args.yes else "no" if args.no else None
     result = draft_harness(
         args.root,
         args.run_id,
@@ -172,6 +176,11 @@ def cmd_plan_draft(args: argparse.Namespace) -> int:
         mode=mode,
         task_kind=args.task_kind,
         executor=args.executor,
+        propose=args.propose,
+        propose_timeout=args.propose_timeout,
+        codex_bin=args.codex_bin,
+        review=args.review or review_decision is not None,
+        review_decision=review_decision,
     )
     _print_json(result)
     return 0 if result["status"] == "pass" else 1
@@ -204,6 +213,21 @@ def cmd_evidence_validate(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "pass" else 1
 
 
+def cmd_evidence_sketch(args: argparse.Namespace) -> int:
+    review_decision = "yes" if args.yes else "no" if args.no else None
+    result = sketch_evidence(
+        args.root,
+        args.run_id,
+        mode=_followup_mode(args),
+        changed_files=args.changed_file,
+        review_decision=review_decision,
+        sketch_timeout=args.sketch_timeout,
+        codex_bin=args.codex_bin,
+    )
+    _print_json(result)
+    return 0 if result["status"] in {"pass", "needs_confirmation"} else 1
+
+
 def cmd_score_validate(args: argparse.Namespace) -> int:
     data = read_json(args.file or run_dir(args.root, args.run_id) / "scorecard.json")
     result = _validation_result("scorecard", validate_scorecard(data))
@@ -221,6 +245,20 @@ def cmd_report(args: argparse.Namespace) -> int:
     paths = write_report(args.root, args.run_id)
     _print_json(_result("pass", paths={name: str(path) for name, path in paths.items()}))
     return 0
+
+
+def cmd_retune_apply(args: argparse.Namespace) -> int:
+    result = apply_retune(
+        args.root,
+        args.run_id,
+        mode=_followup_mode(args),
+        executor=args.executor,
+        dry_run=args.dry_run,
+        depth_warn=args.depth_warn,
+        new_run_id=args.new_run_id,
+    )
+    _print_json(result)
+    return 0 if result["status"] == "pass" else 1
 
 
 def cmd_run_local(args: argparse.Namespace) -> int:
@@ -374,6 +412,13 @@ def build_parser() -> argparse.ArgumentParser:
     plan_draft.add_argument("--plan-mode", "--mode", dest="plan_mode", default="auto", help="auto, micro, quick, standard, strict, or audit")
     plan_draft.add_argument("--task-kind", default="implementation")
     plan_draft.add_argument("--executor", default=DEFAULT_EXECUTOR)
+    plan_draft.add_argument("--propose", action="store_true", help="Use a read-only Codex subagent to propose the matrix, with deterministic fallback")
+    plan_draft.add_argument("--propose-timeout", type=int, default=60)
+    plan_draft.add_argument("--codex-bin", default="codex")
+    plan_draft.add_argument("--review", action="store_true", help="Require matrix confirmation before locking")
+    plan_review = plan_draft.add_mutually_exclusive_group()
+    plan_review.add_argument("--yes", action="store_true", help="Confirm review prompts non-interactively")
+    plan_review.add_argument("--no", action="store_true", help="Reject review prompts non-interactively")
     plan_draft.set_defaults(func=cmd_plan_draft)
 
     intent = subparsers.add_parser("intent")
@@ -424,6 +469,16 @@ def build_parser() -> argparse.ArgumentParser:
     evidence_validate.add_argument("--file", type=Path)
     evidence_validate.add_argument("--matrix", type=Path)
     evidence_validate.set_defaults(func=cmd_evidence_validate)
+    evidence_sketch = evidence_sub.add_parser("sketch")
+    add_common(evidence_sketch)
+    evidence_sketch.add_argument("--run-id", required=True)
+    evidence_sketch.add_argument("--changed-file", action="append")
+    evidence_sketch.add_argument("--sketch-timeout", type=int, default=60)
+    evidence_sketch.add_argument("--codex-bin", default="codex")
+    evidence_review = evidence_sketch.add_mutually_exclusive_group()
+    evidence_review.add_argument("--yes", action="store_true")
+    evidence_review.add_argument("--no", action="store_true")
+    evidence_sketch.set_defaults(func=cmd_evidence_sketch)
 
     score = subparsers.add_parser("score")
     score_sub = score.add_subparsers(dest="score_command", required=True)
@@ -443,6 +498,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(report)
     report.add_argument("--run-id", required=True)
     report.set_defaults(func=cmd_report)
+
+    retune = subparsers.add_parser("retune")
+    retune_sub = retune.add_subparsers(dest="retune_command", required=True)
+    retune_apply = retune_sub.add_parser("apply")
+    add_common(retune_apply)
+    retune_apply.add_argument("--run-id", required=True)
+    retune_apply.add_argument("--new-run-id")
+    retune_apply.add_argument("--executor", default=DEFAULT_EXECUTOR)
+    retune_apply.add_argument("--dry-run", action="store_true")
+    retune_apply.add_argument("--depth-warn", type=int, default=3)
+    retune_apply.set_defaults(func=cmd_retune_apply)
 
     run = subparsers.add_parser("run")
     run_sub = run.add_subparsers(dest="run_command", required=True)

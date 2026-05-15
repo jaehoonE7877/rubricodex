@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import shutil
+import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from rubricodex.artifacts import (
     APP_SESSION_TYPE,
     ArtifactError,
     GOAL_HEADINGS,
+    GOAL_LOCK_TYPE,
     BRIEF_TYPE,
     EVIDENCE_TYPE,
     MATRIX_TYPE,
@@ -35,7 +38,9 @@ from rubricodex.artifacts import (
     collect_app_artifacts,
     compile_goal,
     compute_scorecard,
+    apply_retune,
     draft_harness,
+    sketch_evidence,
     goal_lock_path,
     import_app_session,
     init_project,
@@ -291,6 +296,7 @@ class RubricodexContractTests(unittest.TestCase):
         for artifact_type in (
             BRIEF_TYPE,
             MATRIX_TYPE,
+            GOAL_LOCK_TYPE,
             EVIDENCE_TYPE,
             SCORECARD_TYPE,
             RUN_MANIFEST_TYPE,
@@ -305,6 +311,23 @@ class RubricodexContractTests(unittest.TestCase):
                 self.assertIn(artifact_type, schemas)
                 self.assertTrue(schema_path(artifact_type).is_file())
                 self.assertEqual(load_schema(artifact_type)["$id"], schemas[artifact_type])
+
+    def test_goal_lock_schema_exposes_retune_metadata(self) -> None:
+        properties = load_schema(GOAL_LOCK_TYPE)["properties"]
+
+        for key in ("parent_run_id", "retune_depth", "preserved_pass_criteria", "retune_targets", "matrix_hash"):
+            self.assertIn(key, properties)
+
+    def test_matrix_schema_id_pattern_matches_path_safe_segment(self) -> None:
+        properties = load_schema(MATRIX_TYPE)["properties"]
+        pattern = re.compile(properties["criteria"]["items"]["properties"]["id"]["pattern"])
+
+        for value in ("C-01", "C 01"):
+            with self.subTest(value=value):
+                self.assertTrue(pattern.fullmatch(value))
+        for value in (" C-01", "C-01 ", "../../escaped", ".", "..", " ", "C-\x00"):
+            with self.subTest(value=value):
+                self.assertFalse(pattern.fullmatch(value))
 
     def test_committed_fixture_artifacts_have_schema_coverage(self) -> None:
         schemas = schema_index()
@@ -721,6 +744,22 @@ class RubricodexContractTests(unittest.TestCase):
         matrix["criteria"][1]["id"] = matrix["criteria"][0]["id"]
         self.assertTrue(validate_matrix(matrix))
 
+    def test_matrix_path_unsafe_criterion_id_fails(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][0]["id"] = "../../escaped"
+
+        issues = validate_matrix(matrix)
+
+        self.assertIn("$.criteria[0].id", {issue.path for issue in issues})
+
+    def test_matrix_control_character_criterion_id_fails(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][0]["id"] = "C-\x00"
+
+        issues = validate_matrix(matrix)
+
+        self.assertIn("$.criteria[0].id", {issue.path for issue in issues})
+
     def test_matrix_missing_evidence_required_fails(self) -> None:
         matrix = sample_matrix()
         matrix["criteria"][0]["evidence_required"] = []
@@ -769,6 +808,204 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(validate_matrix(matrix, "strict"), [])
         self.assertTrue((self.root / ".rubricodex/taskpacks/draft-strict/goal.md").is_file())
         self.assertEqual(lint_goal_file(self.root, "draft-strict", mode="strict")["status"], "pass")
+
+    def test_plan_draft_propose_accepts_valid_subagent_matrix(self) -> None:
+        def proposer(**_: object) -> dict:
+            matrix = sample_matrix()
+            matrix["criteria"][0]["name"] = "Payment idempotency"
+            matrix["criteria"][0]["claim"] = "Duplicate payment webhook events are idempotent."
+            matrix["criteria"][0]["check_question"] = "Does the webhook keep one payment side effect per event id?"
+            return matrix
+
+        result = draft_harness(
+            self.root,
+            "proposed",
+            "결제 webhook 중복 처리를 막고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["matrix_source"], "codex-subagent")
+        self.assertEqual(matrix["criteria"][0]["name"], "Payment idempotency")
+        self.assertNotIn("raw", json.dumps(matrix).lower())
+
+    def test_plan_draft_propose_parses_string_boolean_hard_gate(self) -> None:
+        def proposer(**_: object) -> dict:
+            matrix = sample_matrix()
+            matrix["criteria"][0]["hard_gate"] = "true"
+            matrix["criteria"][1]["hard_gate"] = "false"
+            return matrix
+
+        result = draft_harness(
+            self.root,
+            "string-booleans",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["matrix_source"], "codex-subagent")
+        self.assertIs(matrix["criteria"][0]["hard_gate"], True)
+        self.assertIs(matrix["criteria"][1]["hard_gate"], False)
+
+    def test_plan_draft_propose_rewrites_path_unsafe_criterion_id(self) -> None:
+        def proposer(**_: object) -> dict:
+            matrix = sample_matrix(count=4)
+            matrix["criteria"][0]["id"] = "../../escaped"
+            return matrix
+
+        result = draft_harness(
+            self.root,
+            "safe-ids",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+        plan_probes(self.root, "safe-ids", include_supporting=True)
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["matrix_source"], "codex-subagent")
+        self.assertEqual(matrix["criteria"][0]["id"], "C-01")
+        self.assertFalse((taskpack_dir(self.root, "escaped.md")).exists())
+
+    def test_plan_draft_propose_falls_back_when_subagent_output_invalid(self) -> None:
+        def proposer(**_: object) -> dict:
+            return {"criteria": []}
+
+        result = draft_harness(
+            self.root,
+            "fallback",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            propose=True,
+            proposal_runner=proposer,
+        )
+
+        matrix = read_json(matrix_path(self.root))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["matrix_source"], "deterministic-fallback")
+        self.assertEqual(matrix["criteria"][0]["name"], "Intent alignment")
+
+    def test_plan_draft_review_requires_noninteractive_confirmation_for_standard(self) -> None:
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(
+                self.root,
+                "review-needed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                mode="standard",
+                review=True,
+            )
+
+        self.assertIn("$.review", {issue.path for issue in context.exception.issues})
+        self.assertFalse((taskpack_dir(self.root, "review-needed") / "goal.lock.json").exists())
+
+    def test_plan_draft_review_yes_locks_after_confirmation(self) -> None:
+        result = draft_harness(
+            self.root,
+            "reviewed",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            mode="standard",
+            review=True,
+            review_decision="yes",
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["review_status"], "confirmed")
+        self.assertTrue((taskpack_dir(self.root, "reviewed") / "goal.lock.json").is_file())
+
+    def test_plan_draft_review_confirmation_reuses_existing_reviewed_matrix(self) -> None:
+        def proposer(name: str):
+            def run(**_: object) -> dict:
+                matrix = sample_matrix()
+                matrix["criteria"][0]["name"] = name
+                return {"criteria": matrix["criteria"]}
+
+            return run
+
+        with self.assertRaises(ArtifactError):
+            draft_harness(
+                self.root,
+                "reviewed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                propose=True,
+                review=True,
+                proposal_runner=proposer("Reviewed matrix"),
+            )
+
+        result = draft_harness(
+            self.root,
+            "reviewed",
+            "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+            propose=True,
+            review=True,
+            review_decision="yes",
+            proposal_runner=proposer("Regenerated matrix"),
+        )
+        matrix = read_json(matrix_path(self.root))
+
+        self.assertEqual(result["review_status"], "confirmed")
+        self.assertEqual(result["matrix_source"], "existing-draft")
+        self.assertEqual(matrix["criteria"][0]["name"], "Reviewed matrix")
+
+    def test_plan_draft_review_confirmation_rejects_mismatched_existing_draft(self) -> None:
+        with self.assertRaises(ArtifactError):
+            draft_harness(
+                self.root,
+                "reviewed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                review=True,
+            )
+
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(
+                self.root,
+                "reviewed",
+                "다른 billing endpoint를 만들고 test evidence를 남겨줘.",
+                review=True,
+                review_decision="yes",
+            )
+
+        self.assertIn("$.review", {issue.path for issue in context.exception.issues})
+
+    def test_plan_draft_review_confirmation_rejects_substring_goal_match(self) -> None:
+        with self.assertRaises(ArtifactError):
+            draft_harness(
+                self.root,
+                "reviewed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                mode="standard",
+                review=True,
+            )
+
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(
+                self.root,
+                "reviewed",
+                "dashboard page",
+                mode="standard",
+                review=True,
+                review_decision="yes",
+            )
+
+        self.assertIn("$.review", {issue.path for issue in context.exception.issues})
+
+    def test_plan_draft_review_auto_accepts_micro_mode(self) -> None:
+        result = draft_harness(
+            self.root,
+            "micro-reviewed",
+            "오타 문구 수정",
+            mode="micro",
+            review=True,
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["review_status"], "auto_accepted")
 
     def test_plan_draft_rejects_empty_goal(self) -> None:
         with self.assertRaises(ArtifactError) as context:
@@ -892,6 +1129,96 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn('"mode": "quick"', stdout.getvalue())
         self.assertIn('"status": "pass"', stdout.getvalue())
         self.assertTrue((self.root / ".rubricodex/taskpacks/cli-draft/goal.md").is_file())
+
+    def test_cli_plan_draft_propose_review_yes_uses_fallback_when_codex_fails(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "cli-propose",
+                    "--mode",
+                    "standard",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    "--propose",
+                    "--codex-bin",
+                    "false",
+                    "--review",
+                    "--yes",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        output = stdout.getvalue()
+        self.assertIn('"matrix_source": "deterministic-fallback"', output)
+        self.assertIn('"review_status": "confirmed"', output)
+        self.assertTrue((taskpack_dir(self.root, "cli-propose") / "goal.lock.json").is_file())
+
+    def test_cli_plan_draft_rejects_conflicting_review_flags(self) -> None:
+        with redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as context:
+                cli_main(
+                    [
+                        "--root",
+                        str(self.root),
+                        "plan",
+                        "draft",
+                        "--run-id",
+                        "conflict",
+                        "--goal",
+                        "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                        "--review",
+                        "--yes",
+                        "--no",
+                    ]
+                )
+
+        self.assertEqual(context.exception.code, 2)
+        self.assertFalse((taskpack_dir(self.root, "conflict") / "goal.lock.json").exists())
+
+    def test_cli_plan_draft_no_implies_review_rejection(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "reject-without-review",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    "--no",
+                ]
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn('"review_status": "rejected"', stdout.getvalue())
+        self.assertFalse((taskpack_dir(self.root, "reject-without-review") / "goal.lock.json").exists())
+
+    def test_cli_plan_draft_yes_implies_review_confirmation(self) -> None:
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "plan",
+                    "draft",
+                    "--run-id",
+                    "confirm-without-review",
+                    "--goal",
+                    "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                    "--yes",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"review_status": "confirmed"', stdout.getvalue())
+        self.assertTrue((taskpack_dir(self.root, "confirm-without-review") / "goal.lock.json").is_file())
 
     def test_cli_plan_draft_honors_global_mode(self) -> None:
         old_cwd = Path.cwd()
@@ -1191,6 +1518,92 @@ class RubricodexContractTests(unittest.TestCase):
         evidence["evidence_items"][0]["criterion_id"] = "C-999"
         self.assertTrue(validate_evidence(evidence, matrix))
 
+    def test_evidence_missing_status_fails(self) -> None:
+        matrix = sample_matrix()
+        evidence = sample_evidence(matrix)
+        evidence["evidence_items"][0].pop("status")
+
+        issues = validate_evidence(evidence, matrix)
+
+        self.assertIn("$.evidence_items[0].status", {issue.path for issue in issues})
+
+    def test_evidence_sketch_writes_draft_without_promoting_by_default(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = sketch_evidence(
+            self.root,
+            "example-v0.1",
+            changed_files=["rubricodex/artifacts.py", "tests/test_rubricodex.py"],
+            sketch_runner=lambda **_: sample_evidence(matrix),
+        )
+
+        draft_path = run_dir(self.root, "example-v0.1") / "evidence.draft.json"
+        self.assertEqual(result["status"], "needs_confirmation")
+        self.assertTrue(draft_path.is_file())
+        self.assertFalse((run_dir(self.root, "example-v0.1") / "evidence.json").exists())
+        self.assertEqual(validate_evidence(read_json(draft_path), matrix), [])
+
+    def test_evidence_sketch_yes_promotes_confirmed_draft(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        result = sketch_evidence(
+            self.root,
+            "example-v0.1",
+            changed_files=["rubricodex/artifacts.py"],
+            review_decision="yes",
+            sketch_runner=lambda **_: sample_evidence(matrix),
+        )
+
+        evidence_path = run_dir(self.root, "example-v0.1") / "evidence.json"
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(evidence_path.is_file())
+        self.assertEqual(validate_evidence(read_json(evidence_path), matrix), [])
+
+    def test_evidence_sketch_missing_status_falls_back_to_partial(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        sketch = sample_evidence(matrix)
+        sketch["evidence_items"][0].pop("status")
+
+        result = sketch_evidence(
+            self.root,
+            "example-v0.1",
+            changed_files=["rubricodex/artifacts.py"],
+            review_decision="yes",
+            sketch_runner=lambda **_: sketch,
+        )
+        scorecard = compute_scorecard(self.root, "example-v0.1")
+        evidence = read_json(run_dir(self.root, "example-v0.1") / "evidence.json")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["sketch_source"], "deterministic-fallback")
+        self.assertEqual(evidence["evidence_items"][0]["status"], "partial")
+        self.assertEqual(scorecard["decision"], "needs_retune")
+
+    def test_evidence_sketch_requires_changed_files(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        subprocess.run(["git", "init"], cwd=self.root, capture_output=True, check=False)
+        (self.root / "dirty.py").write_text("changed", encoding="utf-8")
+
+        with self.assertRaises(ArtifactError) as context:
+            sketch_evidence(self.root, "example-v0.1", changed_files=[])
+
+        self.assertIn("$.changed_files", {issue.path for issue in context.exception.issues})
+
+    def test_cli_evidence_sketch_rejects_conflicting_review_flags(self) -> None:
+        with redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit) as context:
+                cli_main(["evidence", "sketch", "--run-id", "example-v0.1", "--yes", "--no"])
+
+        self.assertEqual(context.exception.code, 2)
+
     def test_run_local_requires_prompt_lint_pass(self) -> None:
         self.write_default_contract()
         compile_goal(self.root, "example-v0.1")
@@ -1280,6 +1693,32 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertIn("run-manifest.json", output)
         manifest = read_json(run_manifest_path(self.root, "example-v0.1"))
         self.assertEqual(manifest["result_summary"], "Dry-run handoff verified.")
+
+    def test_cli_evidence_sketch_yes_promotes_with_fallback(self) -> None:
+        self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "evidence",
+                    "sketch",
+                    "--run-id",
+                    "example-v0.1",
+                    "--changed-file",
+                    "rubricodex/artifacts.py",
+                    "--codex-bin",
+                    "false",
+                    "--yes",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"status": "pass"', stdout.getvalue())
+        self.assertTrue((run_dir(self.root, "example-v0.1") / "evidence.json").is_file())
 
     def test_run_manifest_rejects_raw_output_fields(self) -> None:
         manifest = {
@@ -1989,6 +2428,492 @@ class RubricodexContractTests(unittest.TestCase):
         text = paths["retune"].read_text(encoding="utf-8")
         self.assertEqual(lint_goal_text(text), [])
         self.assertLess(len(text), 2400)
+
+    def test_retune_apply_creates_next_taskpack_with_preserved_passes(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r2"))
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["new_run_id"], "example-v0.1-r2")
+        self.assertTrue((taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").is_file())
+        self.assertEqual(lock["parent_run_id"], "example-v0.1")
+        self.assertEqual(lock["retune_depth"], 1)
+        self.assertEqual(lock["retune_targets"], ["C-05"])
+        self.assertIn("C-01", lock["preserved_pass_criteria"])
+        locked_criteria = {item["id"]: item for item in lock["locked_criteria"]}
+        self.assertEqual(locked_criteria["C-01"]["claim"], "Criterion 1 is satisfied.")
+        child_goal = (taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").read_text(encoding="utf-8")
+        self.assertIn("/goal Retune Rubricodex run example-v0.1-r2", child_goal)
+        self.assertIn("- Run id: example-v0.1-r2", child_goal)
+        self.assertIn("- Parent run id: example-v0.1", child_goal)
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1-r2")["status"], "pass")
+
+    def test_retune_child_scorecard_inherits_preserved_parent_pass_evidence(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        child_evidence = sample_evidence(matrix, {"C-05": "pass"}, run_id="example-v0.1-r2")
+        child_evidence["evidence_items"] = [
+            item for item in child_evidence["evidence_items"] if item["criterion_id"] == "C-05"
+        ]
+        write_json(run_dir(self.root, "example-v0.1-r2") / "evidence.json", child_evidence)
+
+        scorecard = compute_scorecard(self.root, "example-v0.1-r2")
+
+        self.assertEqual(scorecard["decision"], "pass")
+        self.assertEqual(scorecard["counts"], {"pass": 5, "partial": 0, "missing_evidence": 0, "fail": 0})
+        inherited = next(result for result in scorecard["results"] if result["criterion_id"] == "C-01")
+        self.assertIn("Inherited pass evidence from parent run example-v0.1", inherited["reason"])
+
+    def test_retune_evidence_sketch_fallback_limits_items_to_retune_targets(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        sketch_evidence(
+            self.root,
+            "example-v0.1-r2",
+            changed_files=["src/server.js"],
+            review_decision="yes",
+            sketch_runner=lambda **_: None,
+        )
+        evidence = read_json(run_dir(self.root, "example-v0.1-r2") / "evidence.json")
+        scorecard = compute_scorecard(self.root, "example-v0.1-r2")
+
+        self.assertEqual({item["criterion_id"] for item in evidence["evidence_items"]}, {"C-05"})
+        self.assertEqual(scorecard["counts"], {"pass": 4, "partial": 1, "missing_evidence": 0, "fail": 0})
+        self.assertEqual(scorecard["decision"], "pass_with_warnings")
+
+    def test_retune_chain_inherits_preserved_evidence_from_ancestor_runs(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        child_evidence = sample_evidence(matrix, {"C-05": "partial"}, run_id="example-v0.1-r2")
+        child_evidence["evidence_items"] = [
+            item for item in child_evidence["evidence_items"] if item["criterion_id"] == "C-05"
+        ]
+        write_json(run_dir(self.root, "example-v0.1-r2") / "evidence.json", child_evidence)
+        compute_scorecard(self.root, "example-v0.1-r2")
+        write_report(self.root, "example-v0.1-r2")
+        apply_retune(self.root, "example-v0.1-r2")
+
+        grandchild_evidence = sample_evidence(matrix, {"C-05": "pass"}, run_id="example-v0.1-r3")
+        grandchild_evidence["evidence_items"] = [
+            item for item in grandchild_evidence["evidence_items"] if item["criterion_id"] == "C-05"
+        ]
+        write_json(run_dir(self.root, "example-v0.1-r3") / "evidence.json", grandchild_evidence)
+
+        scorecard = compute_scorecard(self.root, "example-v0.1-r3")
+
+        self.assertEqual(scorecard["decision"], "pass")
+        self.assertEqual(scorecard["counts"], {"pass": 5, "partial": 0, "missing_evidence": 0, "fail": 0})
+        inherited = next(result for result in scorecard["results"] if result["criterion_id"] == "C-01")
+        self.assertIn("example-v0.1", inherited["reason"])
+
+    def test_cli_retune_apply_command(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        with redirect_stdout(StringIO()) as stdout:
+            exit_code = cli_main(
+                [
+                    "--root",
+                    str(self.root),
+                    "retune",
+                    "apply",
+                    "--run-id",
+                    "example-v0.1",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn('"new_run_id": "example-v0.1-r2"', stdout.getvalue())
+        self.assertTrue((taskpack_dir(self.root, "example-v0.1-r2") / "goal.md").is_file())
+
+    def test_retune_apply_uses_next_available_revision_id(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1", depth_warn=1)
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r3"))
+
+        self.assertEqual(result["new_run_id"], "example-v0.1-r3")
+        self.assertEqual(result["retune_depth"], 2)
+        self.assertEqual(lock["retune_depth"], 2)
+        self.assertIn("retune depth 2", result["warning"])
+
+    def test_retune_apply_skips_existing_run_artifact_directory(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        run_dir(self.root, "example-v0.1-r2").mkdir(parents=True)
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        self.assertEqual(result["new_run_id"], "example-v0.1-r3")
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+        self.assertTrue((taskpack_dir(self.root, "example-v0.1-r3") / "goal.md").is_file())
+
+    def test_retune_apply_continues_two_digit_revision_ids(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1-r10")
+        write_json(run_dir(self.root, "example-v0.1-r10") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1-r10")
+        write_report(self.root, "example-v0.1-r10")
+
+        result = apply_retune(self.root, "example-v0.1-r10")
+
+        self.assertEqual(result["new_run_id"], "example-v0.1-r11")
+        self.assertEqual(result["retune_depth"], 10)
+
+    def test_retune_apply_custom_new_run_id_increments_parent_depth(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1", new_run_id="fix-payment-retune")
+
+        lock = read_json(goal_lock_path(self.root, "fix-payment-retune"))
+        self.assertEqual(result["new_run_id"], "fix-payment-retune")
+        self.assertEqual(result["retune_depth"], 1)
+        self.assertEqual(lock["retune_depth"], 1)
+
+    def test_retune_apply_rejects_custom_new_run_id_with_existing_run_artifacts(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        run_dir(self.root, "fix-payment-retune").mkdir(parents=True)
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1", new_run_id="fix-payment-retune")
+
+        self.assertIn("$.new_run_id", {issue.path for issue in context.exception.issues})
+        self.assertFalse(taskpack_dir(self.root, "fix-payment-retune").exists())
+
+    def test_retune_apply_rejects_scorecard_targets_missing_from_matrix(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        matrix["criteria"] = [criterion for criterion in matrix["criteria"] if criterion["id"] != "C-05"]
+        write_json(matrix_path(self.root), matrix)
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "pass")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.retune_targets", str(context.exception.issues))
+
+    def test_retune_apply_rejects_stale_retune_goal_missing_target(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        text = retune_path.read_text(encoding="utf-8")
+        retune_path.write_text(text.replace("- C-05", "- C-99"), encoding="utf-8")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.C-05", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
+    def test_retune_apply_rejects_target_missing_from_include_only(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        before_exclude, after_exclude = retune_path.read_text(encoding="utf-8").split("## Exclude", 1)
+        before_exclude = before_exclude.replace("- C-05", "- C-99", 1)
+        retune_path.write_text(before_exclude + "## Exclude" + after_exclude, encoding="utf-8")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.include.C-05", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
+    def test_retune_apply_rejects_preserved_pass_in_include(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        text = retune_path.read_text(encoding="utf-8")
+        retune_path.write_text(
+            text.replace("## Include\n", "## Include\n- C-01 Endpoint contract: pass. Do not retune.\n", 1),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.retune_scope.preserved_pass_criteria.C-01", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
+    def test_retune_apply_rejects_target_in_exclude(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        retune_path = run_dir(self.root, "example-v0.1") / "retune_goal.md"
+        text = retune_path.read_text(encoding="utf-8")
+        retune_path.write_text(
+            text.replace("## Working rules\n", "  - C-05 Maintainability\n## Working rules\n", 1),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.goal.exclude.C-05", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
+    def test_retune_apply_matches_exact_criterion_ids_without_prefix_collision(self) -> None:
+        matrix = sample_matrix()
+        matrix["criteria"][1]["id"] = "C-01-extra"
+        write_json(intent_path(self.root), sample_brief())
+        write_json(matrix_path(self.root), matrix)
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-01": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["retune_targets"], ["C-01"])
+        self.assertIn("C-01-extra", result["preserved_pass_criteria"])
+
+    def test_retune_apply_rejects_scorecard_missing_current_matrix_criteria(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        matrix["criteria"].append(criterion(6))
+        write_json(matrix_path(self.root), matrix)
+        compile_goal(self.root, "example-v0.1")
+        lint_goal_file(self.root, "example-v0.1")
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "pass")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.scorecard.results", str(context.exception.issues))
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+
+    def test_retune_apply_rejects_parent_lock_drift(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        matrix["criteria"][0]["evidence_required"] = ["changed evidence"]
+        write_json(matrix_path(self.root), matrix)
+        self.assertEqual(verify_matrix_lock(self.root, "example-v0.1")["status"], "fail")
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1")
+
+        self.assertIn("$.parent_lock", str(context.exception.issues))
+
+    def test_retune_lock_blocks_preserved_pass_criteria_changes(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+
+        matrix["criteria"][0]["evidence_required"] = ["weakened evidence"]
+        write_json(matrix_path(self.root), matrix)
+        result = verify_matrix_lock(self.root, "example-v0.1-r2")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("V-012", str(result["issues"]))
+
+    def test_retune_lock_rejects_unknown_retune_targets(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r2"))
+        lock["retune_targets"] = ["C-999"]
+        write_json(goal_lock_path(self.root, "example-v0.1-r2"), lock)
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("$.retune_targets.C-999", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_new_matrix_criteria_outside_scope(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        matrix["criteria"].append(criterion(6))
+        write_json(matrix_path(self.root), matrix)
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve matrix refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("retune lock missing current matrix criteria", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_preserved_claim_change(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        matrix["criteria"][0]["claim"] = "Changed preserved criterion meaning."
+        write_json(matrix_path(self.root), matrix)
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve matrix refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("V-012", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_missing_preserved_goal_guardrail(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        goal_text = goal_path.read_text(encoding="utf-8")
+        goal_path.write_text(goal_text.replace("  - C-01 Endpoint contract\n", ""), encoding="utf-8")
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.preserved_pass_criteria.C-01", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_missing_retune_include_target(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        before_exclude, after_exclude = goal_path.read_text(encoding="utf-8").split("## Exclude", 1)
+        before_exclude = before_exclude.replace("- C-05", "- C-99", 1)
+        goal_path.write_text(before_exclude + "## Exclude" + after_exclude, encoding="utf-8")
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.include.C-05", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_preserved_pass_in_evaluation(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        text = goal_path.read_text(encoding="utf-8")
+        goal_path.write_text(
+            text.replace("## Evaluation\n", "## Evaluation\n- C-01: should stay preserved.\n", 1),
+            encoding="utf-8",
+        )
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.retune_scope.preserved_pass_criteria.C-01", str(result["issues"]))
+
+    def test_retune_lock_revision_rejects_target_in_exclude(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        text = goal_path.read_text(encoding="utf-8")
+        goal_path.write_text(
+            text.replace("## Working rules\n", "  - C-05 Maintainability\n## Working rules\n", 1),
+            encoding="utf-8",
+        )
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve goal refresh")
+
+        self.assertEqual(result["status"], "fail")
+        self.assertFalse(result["revision_approved"])
+        self.assertIn("$.goal.exclude.C-05", str(result["issues"]))
+
+    def test_retune_lock_revision_preserves_retune_metadata(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        apply_retune(self.root, "example-v0.1")
+        goal_path = taskpack_dir(self.root, "example-v0.1-r2") / "goal.md"
+        goal_path.write_text(goal_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+
+        result = verify_matrix_lock(self.root, "example-v0.1-r2", revision_reason="approve whitespace-only goal refresh")
+        lock = read_json(goal_lock_path(self.root, "example-v0.1-r2"))
+
+        self.assertEqual(result["status"], "pass")
+        self.assertTrue(result["revision_approved"])
+        self.assertEqual(lock["parent_run_id"], "example-v0.1")
+        self.assertEqual(lock["retune_targets"], ["C-05"])
+        self.assertIn("C-01", lock["preserved_pass_criteria"])
+        self.assertEqual(lock["matrix_hash"], lock["matrix_sha256"])
 
     def test_report_handles_legacy_scorecard_without_reason(self) -> None:
         matrix = self.write_default_contract()

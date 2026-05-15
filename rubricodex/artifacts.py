@@ -7,9 +7,10 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import __version__
+from .subagents import run_read_only_json
 
 
 SCHEMA_VERSION = "rubricodex.v0.1"
@@ -191,6 +192,13 @@ STATUS_ORDER = {
 
 RETUNE_STATUSES = {"partial", "missing_evidence", "fail"}
 LIGHT_LOCK_MODES = {"micro", "quick"}
+REVIEW_AUTO_ACCEPT_MODES = {"micro", "quick"}
+RETUNE_LOCK_METADATA_KEYS = (
+    "parent_run_id",
+    "retune_depth",
+    "preserved_pass_criteria",
+    "retune_targets",
+)
 
 
 @dataclass(frozen=True)
@@ -338,11 +346,17 @@ def criteria_fingerprint(matrix: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(criterion, dict):
             continue
         evidence_required = criterion.get("evidence_required", [])
+        levels = criterion.get("levels")
         locked.append(
             {
                 "id": criterion.get("id"),
+                "name": criterion.get("name"),
+                "claim": criterion.get("claim"),
+                "check_question": criterion.get("check_question"),
                 "hard_gate": bool(criterion.get("hard_gate")),
                 "evidence_required": list(evidence_required) if isinstance(evidence_required, list) else [],
+                "levels": dict(levels) if isinstance(levels, dict) else {},
+                "retune_hint": criterion.get("retune_hint"),
             }
         )
     return locked
@@ -711,6 +725,172 @@ def draft_matrix(goal: str, mode: str) -> dict[str, Any]:
     return matrix
 
 
+def _matrix_proposal_prompt(goal: str, mode: str) -> str:
+    return f"""Read this repository in read-only mode and propose a Rubricodex evaluation matrix.
+
+Goal:
+{goal}
+
+Mode: {mode}
+
+Return only JSON. Use the existing Rubricodex evaluation matrix shape:
+{{"criteria": [{{"id": "C-01", "name": "...", "claim": "...", "check_question": "...", "evidence_required": ["..."], "hard_gate": true, "levels": {{"pass": "...", "partial": "...", "fail": "..."}}, "retune_hint": "..."}}]}}
+
+Rules:
+- Create 4-6 criteria for standard mode, 6-8 for strict, 3-7 for audit, 2-3 for quick, 1-2 for micro.
+- Make criteria grounded in files, APIs, tests, schemas, or docs you can read.
+- Do not edit files, run write commands, or store raw output.
+- Keep evidence requirements summarized and reference-based.
+"""
+
+
+def _coerce_criterion(index: int, criterion: dict[str, Any]) -> dict[str, Any]:
+    criterion_id = str(criterion.get("id") or f"C-{index:02d}").strip()
+    if not criterion_id or not _is_safe_path_segment(criterion_id):
+        criterion_id = f"C-{index:02d}"
+    evidence_required = criterion.get("evidence_required")
+    if not isinstance(evidence_required, list):
+        evidence_required = []
+    levels = criterion.get("levels")
+    if not isinstance(levels, dict):
+        levels = {}
+    name = str(criterion.get("name") or f"Criterion {index}").strip()
+    claim = str(criterion.get("claim") or f"{name} is satisfied.").strip()
+    hard_gate = criterion.get("hard_gate")
+    if isinstance(hard_gate, str):
+        normalized = hard_gate.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            hard_gate = True
+        elif normalized in {"false", "0", "no"}:
+            hard_gate = False
+    if not isinstance(hard_gate, bool):
+        raise ArtifactError([ValidationIssue(f"$.criteria[{index - 1}].hard_gate", "hard_gate must be boolean")])
+    return {
+        "id": criterion_id,
+        "name": name,
+        "claim": claim,
+        "check_question": str(
+            criterion.get("check_question") or f"Does {name.lower()} have summarized evidence?"
+        ).strip(),
+        "evidence_required": [str(item).strip() for item in evidence_required if str(item).strip()],
+        "hard_gate": hard_gate,
+        "levels": {
+            "pass": str(levels.get("pass") or "Summarized evidence proves this criterion.").strip(),
+            "partial": str(levels.get("partial") or "Evidence is present but incomplete.").strip(),
+            "fail": str(levels.get("fail") or "Evidence disproves this criterion.").strip(),
+        },
+        "retune_hint": str(
+            criterion.get("retune_hint") or f"Fix {criterion_id} without reworking criteria already marked pass."
+        ).strip(),
+    }
+
+
+def _coerce_matrix_proposal(candidate: Any, goal: str, mode: str) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        raise ArtifactError([ValidationIssue("$.proposal", "subagent proposal must be a JSON object")])
+    criteria = candidate.get("criteria")
+    if not isinstance(criteria, list):
+        raise ArtifactError([ValidationIssue("$.proposal.criteria", "subagent proposal must include criteria")])
+    matrix = base_artifact(MATRIX_TYPE, mode=mode)
+    matrix.update(
+        {
+            "method": "gqe-r-lite",
+            "draft_goal": " ".join(goal.strip().split()),
+            "criteria": [
+                _coerce_criterion(index, criterion)
+                for index, criterion in enumerate(criteria, start=1)
+                if isinstance(criterion, dict)
+            ],
+        }
+    )
+    assert_valid(validate_matrix(matrix, mode))
+    return matrix
+
+
+def _propose_matrix(
+    root: Path,
+    goal: str,
+    mode: str,
+    *,
+    timeout: int = 60,
+    codex_bin: str = "codex",
+    proposal_runner: Callable[..., Any] | None = None,
+) -> tuple[dict[str, Any], str, str | None]:
+    prompt = _matrix_proposal_prompt(goal, mode)
+    try:
+        candidate = (
+            proposal_runner(root=root, goal=goal, mode=mode, prompt=prompt, timeout=timeout, codex_bin=codex_bin)
+            if proposal_runner
+            else run_read_only_json(root, prompt, timeout=timeout, codex_bin=codex_bin)
+        )
+        if candidate is None:
+            raise ArtifactError([ValidationIssue("$.proposal", "subagent did not return a JSON proposal")])
+        return _coerce_matrix_proposal(candidate, goal, mode), "codex-subagent", None
+    except (ArtifactError, TypeError, ValueError) as error:
+        fallback = draft_matrix(goal, mode)
+        return fallback, "deterministic-fallback", str(error)
+
+
+def _review_matrix(
+    root: Path,
+    mode: str,
+    *,
+    review_decision: str | None = None,
+    editor: str | None = None,
+) -> str:
+    decision = review_decision.strip().lower() if isinstance(review_decision, str) else None
+    if decision in {"y", "yes", "confirm", "confirmed"}:
+        return "confirmed"
+    if decision in {"n", "no", "cancel", "reject", "rejected"}:
+        return "rejected"
+    if decision == "edit":
+        if not editor:
+            raise ArtifactError([ValidationIssue("$.review", "edit review requires an editor")])
+        completed = subprocess.run([editor, str(matrix_path(root))], check=False)
+        if completed.returncode != 0:
+            raise ArtifactError([ValidationIssue("$.review", f"editor exited with code {completed.returncode}")])
+        matrix = read_json(matrix_path(root))
+        assert_valid(validate_matrix(matrix, mode))
+        return "edited"
+    if mode in REVIEW_AUTO_ACCEPT_MODES:
+        return "auto_accepted"
+    raise ArtifactError(
+        [
+            ValidationIssue(
+                "$.review",
+                "matrix confirmation required for this mode; rerun with --yes, --no, or interactive edit",
+            )
+        ]
+    )
+
+
+def _is_confirm_review_decision(review_decision: str | None) -> bool:
+    decision = review_decision.strip().lower() if isinstance(review_decision, str) else None
+    return decision in {"y", "yes", "confirm", "confirmed"}
+
+
+def _normalize_request_text(text: Any) -> str:
+    return " ".join(str(text).strip().split())
+
+
+def _review_draft_matches_request(brief: dict[str, Any], matrix: dict[str, Any], goal_text: str, mode: str) -> bool:
+    if brief.get("mode") != mode:
+        return False
+    if matrix.get("mode") != mode:
+        return False
+    blocks = brief.get("blocks")
+    if not isinstance(blocks, dict):
+        return False
+    goal_summary = _normalize_request_text(goal_text)
+    expected_purpose = f"Complete the requested Rubricodex task: {goal_summary}"
+    purpose = _normalize_request_text(blocks.get("purpose", ""))
+    scope_in = blocks.get("scope_in", [])
+    scope_items = [_normalize_request_text(item) for item in scope_in] if isinstance(scope_in, list) else []
+    matrix_goal = _normalize_request_text(matrix.get("draft_goal", ""))
+    brief_matches = purpose == expected_purpose or goal_summary in scope_items
+    return brief_matches and matrix_goal == goal_summary
+
+
 def locked_taskpack_run_ids(root: Path | str) -> list[str]:
     taskpacks = artifact_root(root) / "taskpacks"
     if not taskpacks.exists():
@@ -725,6 +905,13 @@ def draft_harness(
     mode: str = "auto",
     task_kind: str = "implementation",
     executor: str = DEFAULT_EXECUTOR,
+    propose: bool = False,
+    propose_timeout: int = 60,
+    codex_bin: str = "codex",
+    proposal_runner: Callable[..., Any] | None = None,
+    review: bool = False,
+    review_decision: str | None = None,
+    editor: str | None = None,
 ) -> dict[str, Any]:
     goal_text = goal.strip()
     if not goal_text:
@@ -734,6 +921,8 @@ def draft_harness(
         raise ArtifactError([ValidationIssue("$.mode", f"mode must be auto or one of {', '.join(MODE_CRITERIA_RANGE)}")])
     if not _is_safe_path_segment(run_id):
         raise ArtifactError([ValidationIssue("$.run_id", "run_id must be a single path-safe segment")])
+    if propose_timeout < 1:
+        raise ArtifactError([ValidationIssue("$.propose_timeout", "propose timeout must be greater than zero")])
 
     root_path = Path(root)
     locked_run_ids = locked_taskpack_run_ids(root_path)
@@ -747,12 +936,55 @@ def draft_harness(
             ]
         )
     init_project(root_path, mode=active_mode, executor=executor)
-    brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
-    matrix = draft_matrix(goal_text, active_mode)
+    proposal_error = None
+    use_existing_review_draft = (
+        review
+        and _is_confirm_review_decision(review_decision)
+        and intent_path(root_path).is_file()
+        and matrix_path(root_path).is_file()
+    )
+    if use_existing_review_draft:
+        brief = read_json(intent_path(root_path))
+        matrix = read_json(matrix_path(root_path))
+        if not _review_draft_matches_request(brief, matrix, goal_text, active_mode):
+            raise ArtifactError(
+                [ValidationIssue("$.review", "existing review draft does not match requested goal or mode")]
+            )
+        matrix_source = "existing-draft"
+    else:
+        brief = draft_brief(goal_text, active_mode, task_kind=task_kind)
+    if propose and not use_existing_review_draft:
+        matrix, matrix_source, proposal_error = _propose_matrix(
+            root_path,
+            goal_text,
+            active_mode,
+            timeout=propose_timeout,
+            codex_bin=codex_bin,
+            proposal_runner=proposal_runner,
+        )
+    elif not use_existing_review_draft:
+        matrix = draft_matrix(goal_text, active_mode)
+        matrix_source = "deterministic"
     assert_valid(validate_brief(brief, active_mode))
     assert_valid(validate_matrix(matrix, active_mode))
-    write_json(intent_path(root_path), brief)
-    write_json(matrix_path(root_path), matrix)
+    if not use_existing_review_draft:
+        write_json(intent_path(root_path), brief)
+        write_json(matrix_path(root_path), matrix)
+    review_status = "not_requested"
+    if review:
+        review_status = _review_matrix(root_path, active_mode, review_decision=review_decision, editor=editor)
+        if review_status == "rejected":
+            return {
+                "status": "fail",
+                "mode": active_mode,
+                "run_id": run_id,
+                "readiness": brief["request_readiness"],
+                "brief_path": str(intent_path(root_path)),
+                "matrix_path": str(matrix_path(root_path)),
+                "matrix_source": matrix_source,
+                "proposal_error": proposal_error,
+                "review_status": review_status,
+            }
     paths = compile_goal(root_path, run_id, mode=active_mode, executor=executor)
     lint = lint_goal_file(root_path, run_id, mode=active_mode)
     lock = verify_matrix_lock(root_path, run_id, mode=active_mode)
@@ -764,6 +996,9 @@ def draft_harness(
         "paths": {name: str(path) for name, path in paths.items()},
         "brief_path": str(intent_path(root_path)),
         "matrix_path": str(matrix_path(root_path)),
+        "matrix_source": matrix_source,
+        "proposal_error": proposal_error,
+        "review_status": review_status,
         "prompt_lint_status": lint["status"],
         "matrix_lock_status": lock["status"],
     }
@@ -855,6 +1090,8 @@ def validate_matrix(data: dict[str, Any], mode: str | None = None) -> list[Valid
         criterion_id = criterion.get("id")
         if not isinstance(criterion_id, str) or not criterion_id.strip():
             issues.append(ValidationIssue(f"{path}.id", "criterion id is required"))
+        elif not _is_safe_path_segment(criterion_id):
+            issues.append(ValidationIssue(f"{path}.id", "criterion id must be a single path-safe segment"))
         elif criterion_id in seen:
             issues.append(ValidationIssue(f"{path}.id", f"duplicate criterion id {criterion_id}"))
         else:
@@ -910,7 +1147,7 @@ def validate_evidence(data: dict[str, Any], matrix: dict[str, Any]) -> list[Vali
             issues.append(ValidationIssue(f"{path}.criterion_id", f"unknown criterion id {criterion_id!r}"))
         if not isinstance(item.get("summary"), str) or not item["summary"].strip():
             issues.append(ValidationIssue(f"{path}.summary", "summary is required"))
-        if item.get("status", "pass") not in STATUS_ORDER:
+        if item.get("status") not in STATUS_ORDER:
             issues.append(ValidationIssue(f"{path}.status", "status must be pass, partial, missing_evidence, or fail"))
         if item.get("artifact_refs") is not None and not isinstance(item["artifact_refs"], list):
             issues.append(ValidationIssue(f"{path}.artifact_refs", "artifact_refs must be a list when present"))
@@ -1046,6 +1283,7 @@ def _is_safe_path_segment(value: str) -> bool:
         and value not in {".", ".."}
         and "/" not in value
         and "\\" not in value
+        and all(char.isprintable() for char in value)
     )
 
 
@@ -1295,6 +1533,27 @@ def _current_criteria_by_id(matrix: dict[str, Any]) -> dict[str, dict[str, Any]]
     }
 
 
+PRESERVED_CRITERION_FIELDS = (
+    "id",
+    "name",
+    "claim",
+    "check_question",
+    "hard_gate",
+    "evidence_required",
+    "levels",
+    "retune_hint",
+)
+
+
+def _preserved_criterion_changed(locked: dict[str, Any], current: dict[str, Any]) -> bool:
+    return any(key in locked and locked.get(key) != current.get(key) for key in PRESERVED_CRITERION_FIELDS)
+
+
+def _section_has_criterion_marker(section: str, criterion_id: str) -> bool:
+    pattern = rf"(^|\n)\s*-\s*{re.escape(criterion_id)}(?=$|[:\s(])"
+    return re.search(pattern, section) is not None
+
+
 def validate_matrix_lock(
     lock: dict[str, Any],
     brief: dict[str, Any],
@@ -1359,10 +1618,100 @@ def validate_matrix_lock(
                 )
             )
 
+    include_text = _section_content(goal_text, "Include") or ""
+    exclude_text = _section_content(goal_text, "Exclude") or ""
+    working_rules_text = _section_content(goal_text, "Working rules") or ""
+    preservation_text = "\n".join(part for part in (exclude_text, working_rules_text) if part)
     evaluation_text = _section_content(goal_text, "Evaluation") or ""
-    for criterion_id in current_criteria:
-        if criterion_id not in evaluation_text:
+    retune_targets = lock.get("retune_targets")
+    retune_target_ids = (
+        [str(item) for item in retune_targets if str(item).strip()]
+        if isinstance(retune_targets, list) and retune_targets
+        else []
+    )
+    preserved = lock.get("preserved_pass_criteria")
+    preserved_ids = (
+        [str(item) for item in preserved if str(item).strip()]
+        if isinstance(preserved, list) and preserved
+        else []
+    )
+    for criterion_id in retune_target_ids:
+        if criterion_id not in current_criteria:
+            issues.append(
+                ValidationIssue(
+                    f"$.retune_targets.{criterion_id}",
+                    f"retune target missing from current matrix: {criterion_id}",
+                )
+            )
+        if not _section_has_criterion_marker(include_text, criterion_id):
+            issues.append(
+                ValidationIssue(
+                    f"$.goal.include.{criterion_id}",
+                    f"retune target missing from Include: {criterion_id}",
+                )
+            )
+        if _section_has_criterion_marker(preservation_text, criterion_id):
+            issues.append(
+                ValidationIssue(
+                    f"$.goal.exclude.{criterion_id}",
+                    f"retune target included in preserved scope: {criterion_id}",
+                )
+            )
+    if retune_target_ids or preserved_ids:
+        missing_retune_scope = sorted(set(current_criteria) - (set(retune_target_ids) | set(preserved_ids)))
+        if missing_retune_scope:
+            issues.append(
+                ValidationIssue(
+                    "$.retune_scope",
+                    "retune lock missing current matrix criteria: " + ", ".join(missing_retune_scope),
+                )
+            )
+    goal_required_criteria = retune_target_ids if retune_target_ids or preserved_ids else list(current_criteria)
+    for criterion_id in goal_required_criteria:
+        if not _section_has_criterion_marker(evaluation_text, criterion_id):
             issues.append(ValidationIssue(f"$.goal.{criterion_id}", f"goal.md is missing criterion {criterion_id}"))
+
+    if preserved_ids:
+        current_fingerprints = {
+            str(item.get("id")): item
+            for item in criteria_fingerprint({"criteria": list(current_criteria.values())})
+            if isinstance(item, dict) and item.get("id")
+        }
+        for criterion_id in preserved_ids:
+            locked = locked_criteria.get(criterion_id)
+            current = current_fingerprints.get(criterion_id)
+            if _section_has_criterion_marker(include_text, criterion_id) or _section_has_criterion_marker(
+                evaluation_text,
+                criterion_id,
+            ):
+                issues.append(
+                    ValidationIssue(
+                        f"$.goal.retune_scope.preserved_pass_criteria.{criterion_id}",
+                        f"preserved pass criterion included in retune scope: {criterion_id}",
+                    )
+                )
+            if locked is None or current is None:
+                issues.append(
+                    ValidationIssue(
+                        f"$.preserved_pass_criteria.{criterion_id}",
+                        f"V-012 preserved pass criterion changed after retune lock: {criterion_id}",
+                    )
+                )
+                continue
+            if _preserved_criterion_changed(locked, current):
+                issues.append(
+                    ValidationIssue(
+                        f"$.preserved_pass_criteria.{criterion_id}",
+                        f"V-012 preserved pass criterion changed after retune lock: {criterion_id}",
+                    )
+                )
+            if not _section_has_criterion_marker(preservation_text, criterion_id):
+                issues.append(
+                    ValidationIssue(
+                        f"$.goal.preserved_pass_criteria.{criterion_id}",
+                        f"goal.md is missing preserved pass criterion {criterion_id}",
+                    )
+                )
     return issues
 
 
@@ -1373,8 +1722,24 @@ def _is_unsafe_lock_issue(issue: ValidationIssue) -> bool:
             "hard gate was weakened",
             "evidence_required was removed",
             "goal.md is missing criterion",
+            "goal.md is missing preserved pass criterion",
+            "V-012 preserved pass criterion changed",
+            "retune lock missing current matrix criteria",
+            "retune target missing from current matrix",
+            "retune target missing from Include",
+            "retune target included in preserved scope",
+            "preserved pass criterion included in retune scope",
         )
     )
+
+
+def _preserve_retune_lock_metadata(source: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    for key in RETUNE_LOCK_METADATA_KEYS:
+        if key in source:
+            target[key] = source[key]
+    if "matrix_hash" in source:
+        target["matrix_hash"] = target["matrix_sha256"]
+    return target
 
 
 def verify_matrix_lock(
@@ -1406,6 +1771,7 @@ def verify_matrix_lock(
     if errors and revision_reason and not any(_is_unsafe_lock_issue(issue) for issue in errors):
         executor = str(lock.get("executor", DEFAULT_EXECUTOR))
         updated_lock = build_goal_lock(brief, matrix, goal_text, executor, mode, run_id, revision_reason)
+        updated_lock = _preserve_retune_lock_metadata(lock, updated_lock)
         write_json(lock_path, updated_lock)
         issues = []
         errors = []
@@ -1821,6 +2187,222 @@ def run_probes(
     }
 
 
+def evidence_draft_path(root: Path | str, run_id: str) -> Path:
+    return run_dir(root, run_id) / "evidence.draft.json"
+
+
+def _retune_scope_for_run(root_path: Path, run_id: str) -> tuple[list[str], list[str], str | None]:
+    lock_file = goal_lock_path(root_path, run_id)
+    if not lock_file.is_file():
+        return [], [], None
+    lock = read_json(lock_file)
+    parent_run_id = lock.get("parent_run_id")
+    retune_targets = lock.get("retune_targets")
+    preserved = lock.get("preserved_pass_criteria")
+    target_ids = (
+        [str(item) for item in retune_targets if str(item).strip()]
+        if isinstance(retune_targets, list)
+        else []
+    )
+    preserved_ids = (
+        [str(item) for item in preserved if str(item).strip()]
+        if isinstance(preserved, list)
+        else []
+    )
+    parent = parent_run_id if isinstance(parent_run_id, str) and parent_run_id.strip() else None
+    return target_ids, preserved_ids, parent
+
+
+def _criteria_for_ids(matrix: dict[str, Any], criterion_ids: list[str] | None) -> list[dict[str, Any]]:
+    allowed = set(criterion_ids or [])
+    return [
+        criterion
+        for criterion in matrix.get("criteria", [])
+        if isinstance(criterion, dict) and (not allowed or str(criterion.get("id")) in allowed)
+    ]
+
+
+def _evidence_sketch_prompt(
+    run_id: str,
+    matrix: dict[str, Any],
+    changed_files: list[str],
+    criterion_ids: list[str] | None = None,
+) -> str:
+    criteria = [
+        {
+            "id": criterion.get("id"),
+            "name": criterion.get("name"),
+            "check_question": criterion.get("check_question"),
+            "evidence_required": criterion.get("evidence_required", []),
+        }
+        for criterion in _criteria_for_ids(matrix, criterion_ids)
+    ]
+    return f"""Read this repository in read-only mode and draft Rubricodex evidence for run {run_id}.
+
+Changed files:
+{json.dumps(changed_files, indent=2)}
+
+Criteria:
+{json.dumps(criteria, indent=2)}
+
+Return only JSON using the existing evidence artifact shape:
+{{"evidence_items": [{{"criterion_id": "C-01", "summary": "one-line summarized evidence", "artifact_refs": ["path"], "status": "partial"}}]}}
+
+Rules:
+- Use only file paths and one-line summaries.
+- Do not include raw command output, raw logs, transcripts, stdout, or stderr.
+- Do not edit files.
+- Mark uncertain items as partial or missing_evidence.
+"""
+
+
+def _fallback_evidence_sketch(
+    matrix: dict[str, Any],
+    mode: str,
+    run_id: str,
+    changed_files: list[str],
+    criterion_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    evidence = base_artifact(EVIDENCE_TYPE, mode=mode, run_id=run_id)
+    items = []
+    for index, criterion in enumerate(_criteria_for_ids(matrix, criterion_ids)):
+        if not criterion.get("id"):
+            continue
+        ref = changed_files[index % len(changed_files)]
+        items.append(
+            {
+                "id": f"E-{criterion['id']}",
+                "criterion_id": criterion["id"],
+                "kind": "code",
+                "summary": f"Draft evidence from {ref}; user confirmation required for {criterion['id']}.",
+                "artifact_refs": [ref],
+                "status": "partial",
+                "confidence": 0.4,
+            }
+        )
+    evidence.update(
+        {
+            "executor": LOCAL_RUNNER_EXECUTOR,
+            "raw_output_stored": False,
+            "evidence_items": items,
+        }
+    )
+    return evidence
+
+
+def _coerce_evidence_sketch(
+    candidate: Any,
+    matrix: dict[str, Any],
+    mode: str,
+    run_id: str,
+    criterion_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        raise ArtifactError([ValidationIssue("$.evidence_sketch", "subagent evidence sketch must be a JSON object")])
+    evidence = base_artifact(EVIDENCE_TYPE, mode=mode, run_id=run_id)
+    evidence.update(
+        {
+            "executor": str(candidate.get("executor") or LOCAL_RUNNER_EXECUTOR),
+            "raw_output_stored": False,
+            "evidence_items": candidate.get("evidence_items", []),
+        }
+    )
+    if not isinstance(evidence["evidence_items"], list):
+        raise ArtifactError([ValidationIssue("$.evidence_items", "evidence_items must be a list")])
+    if criterion_ids:
+        allowed = set(criterion_ids)
+        evidence["evidence_items"] = [
+            item
+            for item in evidence["evidence_items"]
+            if isinstance(item, dict) and str(item.get("criterion_id")) in allowed
+        ]
+    assert_valid(validate_evidence(evidence, matrix))
+    return evidence
+
+
+def sketch_evidence(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    changed_files: list[str] | None = None,
+    review_decision: str | None = None,
+    sketch_timeout: int = 60,
+    codex_bin: str = "codex",
+    sketch_runner: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    if sketch_timeout < 1:
+        raise ArtifactError([ValidationIssue("$.sketch_timeout", "sketch timeout must be greater than zero")])
+    root_path = Path(root)
+    _assert_local_runner_ready(root_path, run_id, mode)
+    matrix = read_json(matrix_path(root_path))
+    assert_valid(validate_matrix(matrix, mode))
+
+    changed_candidates = _summarize_changed_files(root_path) if changed_files is None else changed_files
+    normalized_changed = [path.strip() for path in changed_candidates if path.strip()]
+    if not normalized_changed:
+        raise ArtifactError([ValidationIssue("$.changed_files", "evidence sketch requires at least one changed file")])
+
+    retune_target_ids, _, _ = _retune_scope_for_run(root_path, run_id)
+    prompt = _evidence_sketch_prompt(run_id, matrix, normalized_changed, retune_target_ids or None)
+    sketch_source = "codex-subagent"
+    sketch_error = None
+    try:
+        candidate = (
+            sketch_runner(
+                root=root_path,
+                run_id=run_id,
+                mode=mode,
+                matrix=matrix,
+                changed_files=normalized_changed,
+                prompt=prompt,
+                timeout=sketch_timeout,
+                codex_bin=codex_bin,
+            )
+            if sketch_runner
+            else run_read_only_json(root_path, prompt, timeout=sketch_timeout, codex_bin=codex_bin)
+        )
+        if candidate is None:
+            raise ArtifactError([ValidationIssue("$.evidence_sketch", "subagent did not return a JSON sketch")])
+        evidence = _coerce_evidence_sketch(candidate, matrix, mode, run_id, retune_target_ids or None)
+    except (ArtifactError, TypeError, ValueError) as error:
+        sketch_source = "deterministic-fallback"
+        sketch_error = str(error)
+        evidence = _fallback_evidence_sketch(matrix, mode, run_id, normalized_changed, retune_target_ids or None)
+        assert_valid(validate_evidence(evidence, matrix))
+
+    draft_path = write_json(evidence_draft_path(root_path, run_id), evidence)
+    decision = review_decision.strip().lower() if isinstance(review_decision, str) else None
+    if decision in {"n", "no", "cancel", "reject", "rejected"}:
+        return {
+            "status": "fail",
+            "run_id": run_id,
+            "evidence_draft_path": str(draft_path),
+            "review_status": "rejected",
+            "sketch_source": sketch_source,
+            "sketch_error": sketch_error,
+        }
+    if decision in {"y", "yes", "confirm", "confirmed"}:
+        evidence_path = write_json(run_dir(root_path, run_id) / "evidence.json", evidence)
+        return {
+            "status": "pass",
+            "run_id": run_id,
+            "evidence_draft_path": str(draft_path),
+            "evidence_path": str(evidence_path),
+            "review_status": "confirmed",
+            "sketch_source": sketch_source,
+            "sketch_error": sketch_error,
+        }
+    return {
+        "status": "needs_confirmation",
+        "run_id": run_id,
+        "evidence_draft_path": str(draft_path),
+        "review_status": "pending",
+        "changed_files": normalized_changed,
+        "sketch_source": sketch_source,
+        "sketch_error": sketch_error,
+    }
+
+
 def _criterion_reason(criterion: dict[str, Any], status: str, items: list[dict[str, Any]]) -> str:
     if not items:
         reason = "No summarized evidence item was recorded for this criterion."
@@ -1841,6 +2423,66 @@ def _criterion_reason(criterion: dict[str, Any], status: str, items: list[dict[s
     return reason
 
 
+def _find_preserved_pass_evidence(
+    root_path: Path,
+    parent_run_id: str,
+    criterion_id: str,
+    matrix: dict[str, Any],
+    visited: set[str],
+) -> list[tuple[dict[str, Any], str]]:
+    if parent_run_id in visited:
+        return []
+    visited.add(parent_run_id)
+
+    parent_evidence_file = run_dir(root_path, parent_run_id) / "evidence.json"
+    if parent_evidence_file.is_file():
+        parent_evidence = read_json(parent_evidence_file)
+        assert_valid(validate_evidence(parent_evidence, matrix))
+        pass_items = [
+            item
+            for item in parent_evidence["evidence_items"]
+            if str(item.get("criterion_id")) == criterion_id and item.get("status") == "pass"
+        ]
+        if pass_items:
+            return [(item, parent_run_id) for item in pass_items]
+
+    _, preserved, ancestor_run_id = _retune_scope_for_run(root_path, parent_run_id)
+    if ancestor_run_id is None or criterion_id not in preserved:
+        return []
+    return _find_preserved_pass_evidence(root_path, ancestor_run_id, criterion_id, matrix, visited)
+
+
+def _inherit_preserved_parent_evidence(
+    root_path: Path,
+    run_id: str,
+    matrix: dict[str, Any],
+    items_by_criterion: dict[str, list[dict[str, Any]]],
+) -> None:
+    _, preserved, parent_run_id = _retune_scope_for_run(root_path, run_id)
+    if parent_run_id is None or not preserved:
+        return
+
+    missing_preserved_ids = [
+        str(criterion_id)
+        for criterion_id in preserved
+        if str(criterion_id).strip() and str(criterion_id) not in items_by_criterion
+    ]
+    if not missing_preserved_ids:
+        return
+
+    for criterion_id in missing_preserved_ids:
+        inherited_items = []
+        for item, origin_run_id in _find_preserved_pass_evidence(root_path, parent_run_id, criterion_id, matrix, set()):
+            summary = str(item.get("summary") or "").strip()
+            inherited = dict(item)
+            inherited["summary"] = f"Inherited pass evidence from parent run {origin_run_id}: {summary}"
+            inherited["status"] = "pass"
+            inherited["inherited_from_run"] = origin_run_id
+            inherited_items.append(inherited)
+        if inherited_items:
+            items_by_criterion[criterion_id] = inherited_items
+
+
 def compute_scorecard(
     root: Path | str,
     run_id: str,
@@ -1856,6 +2498,7 @@ def compute_scorecard(
     items_by_criterion: dict[str, list[dict[str, Any]]] = {}
     for item in evidence["evidence_items"]:
         items_by_criterion.setdefault(item["criterion_id"], []).append(item)
+    _inherit_preserved_parent_evidence(root_path, run_id, matrix, items_by_criterion)
 
     counts = {"pass": 0, "partial": 0, "missing_evidence": 0, "fail": 0}
     results: list[dict[str, Any]] = []
@@ -2072,6 +2715,229 @@ def write_report(root: Path | str, run_id: str) -> dict[str, Path]:
     assert_valid(lint_goal_text(retune_text, scorecard.get("mode", DEFAULT_MODE)))
     retune_path = write_text(run_dir(root_path, run_id) / "retune_goal.md", retune_text)
     return {"report": report_path, "retune": retune_path}
+
+
+def _split_retune_revision(run_id: str) -> tuple[str, int]:
+    match = re.match(r"^(?P<base>.+)-r(?P<revision>[1-9][0-9]*)$", run_id)
+    if not match:
+        return run_id, 0
+    revision = int(match.group("revision"))
+    if revision < 2:
+        return run_id, 0
+    return match.group("base"), revision - 1
+
+
+def _parent_retune_depth(lock: dict[str, Any], run_id: str) -> int:
+    depth = lock.get("retune_depth")
+    if isinstance(depth, int) and depth >= 0:
+        return depth
+    return _split_retune_revision(run_id)[1]
+
+
+def _retune_run_id_exists(root: Path, run_id: str) -> bool:
+    return taskpack_dir(root, run_id).exists() or run_dir(root, run_id).exists()
+
+
+def _next_retune_run_id(root: Path, run_id: str, parent_depth: int | None = None) -> tuple[str, int]:
+    base, suffix_depth = _split_retune_revision(run_id)
+    next_revision = suffix_depth + 2
+    base_depth = parent_depth if parent_depth is not None else suffix_depth
+    while True:
+        candidate = f"{base}-r{next_revision}"
+        if not _retune_run_id_exists(root, candidate):
+            next_depth = base_depth + (next_revision - suffix_depth - 1)
+            return candidate, next_depth
+        next_revision += 1
+
+
+def _retune_results(scorecard: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    results = scorecard.get("results", [])
+    if not isinstance(results, list):
+        return [], []
+    retune = [
+        result
+        for result in results
+        if isinstance(result, dict) and result.get("status") in RETUNE_STATUSES and result.get("criterion_id")
+    ]
+    passed = [
+        result
+        for result in results
+        if isinstance(result, dict) and result.get("status") == "pass" and result.get("criterion_id")
+    ]
+    return retune, passed
+
+
+def _child_retune_goal_text(parent_goal_text: str, parent_run_id: str, child_run_id: str) -> str:
+    lines: list[str] = []
+    parent_context_added = False
+    for line in parent_goal_text.splitlines():
+        if line.startswith(f"/goal Retune Rubricodex run {parent_run_id} "):
+            lines.append(line.replace(f"run {parent_run_id}", f"run {child_run_id}", 1))
+            continue
+        if line == f"- Run id: {parent_run_id}":
+            lines.append(f"- Run id: {child_run_id}")
+            lines.append(f"- Parent run id: {parent_run_id}")
+            parent_context_added = True
+            continue
+        lines.append(line)
+    if not parent_context_added:
+        lines.append(f"- Parent run id: {parent_run_id}")
+    return "\n".join(lines) + "\n"
+
+
+def _parent_lock_issues(result: dict[str, Any]) -> list[ValidationIssue]:
+    issues = [ValidationIssue("$.parent_lock", "parent matrix lock must pass before retune apply")]
+    for issue in result.get("issues", []):
+        if not isinstance(issue, dict):
+            continue
+        path = str(issue.get("path") or "$")
+        suffix = path[1:] if path.startswith("$") else f".{path}"
+        issues.append(
+            ValidationIssue(
+                f"$.parent_lock{suffix}",
+                str(issue.get("message") or "parent lock issue"),
+                str(issue.get("severity") or "error"),
+            )
+        )
+    return issues
+
+
+def apply_retune(
+    root: Path | str,
+    run_id: str,
+    mode: str = DEFAULT_MODE,
+    executor: str = DEFAULT_EXECUTOR,
+    dry_run: bool = False,
+    depth_warn: int = 3,
+    new_run_id: str | None = None,
+) -> dict[str, Any]:
+    root_path = Path(root)
+    if not _is_safe_path_segment(run_id):
+        raise ArtifactError([ValidationIssue("$.run_id", "run_id must be a single path-safe segment")])
+    if new_run_id is not None and not _is_safe_path_segment(new_run_id):
+        raise ArtifactError([ValidationIssue("$.new_run_id", "new_run_id must be a single path-safe segment")])
+
+    retune_path = run_dir(root_path, run_id) / "retune_goal.md"
+    scorecard_path = run_dir(root_path, run_id) / "scorecard.json"
+    parent_lock_path = goal_lock_path(root_path, run_id)
+    missing = [str(path) for path in (retune_path, scorecard_path, parent_lock_path) if not path.is_file()]
+    if missing:
+        raise ArtifactError([ValidationIssue("$.retune", "missing retune inputs: " + ", ".join(missing))])
+
+    scorecard = read_json(scorecard_path)
+    assert_valid(validate_scorecard(scorecard))
+    active_mode = scorecard.get("mode") if isinstance(scorecard.get("mode"), str) else mode
+    if active_mode not in MODE_CRITERIA_RANGE:
+        active_mode = mode
+    parent_lock = verify_matrix_lock(root_path, run_id, mode=active_mode)
+    if parent_lock["status"] != "pass":
+        raise ArtifactError(_parent_lock_issues(parent_lock))
+    retune_targets, passed_results = _retune_results(scorecard)
+    if not retune_targets:
+        raise ArtifactError([ValidationIssue("$.retune_targets", "scorecard has no failed, partial, or missing_evidence criteria")])
+
+    parent_lock_data = read_json(parent_lock_path)
+    parent_depth = _parent_retune_depth(parent_lock_data, run_id)
+    selected_run_id, retune_depth = (
+        (new_run_id, parent_depth + 1) if new_run_id else _next_retune_run_id(root_path, run_id, parent_depth)
+    )
+    assert selected_run_id is not None
+    target_dir = taskpack_dir(root_path, selected_run_id)
+    if target_dir.exists():
+        raise ArtifactError([ValidationIssue("$.new_run_id", f"taskpack already exists: {selected_run_id}")])
+    if run_dir(root_path, selected_run_id).exists():
+        raise ArtifactError([ValidationIssue("$.new_run_id", f"run artifacts already exist: {selected_run_id}")])
+
+    brief = read_json(intent_path(root_path))
+    matrix = read_json(matrix_path(root_path))
+    assert_valid(validate_matrix(matrix, active_mode))
+    current_criteria = _current_criteria_by_id(matrix)
+    retune_target_ids = [str(result["criterion_id"]) for result in retune_targets]
+    missing_retune_targets = sorted(criterion_id for criterion_id in retune_target_ids if criterion_id not in current_criteria)
+    if missing_retune_targets:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.retune_targets",
+                    "retune targets missing from current matrix: " + ", ".join(missing_retune_targets),
+                )
+            ]
+        )
+    preserved_pass_ids = [str(result["criterion_id"]) for result in passed_results]
+    scorecard_criterion_ids = set(retune_target_ids) | set(preserved_pass_ids)
+    missing_scorecard_results = sorted(set(current_criteria) - scorecard_criterion_ids)
+    if missing_scorecard_results:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.scorecard.results",
+                    "scorecard results missing current matrix criteria: " + ", ".join(missing_scorecard_results),
+                )
+            ]
+        )
+    missing_preserved = sorted(criterion_id for criterion_id in preserved_pass_ids if criterion_id not in current_criteria)
+    if missing_preserved:
+        raise ArtifactError(
+            [
+                ValidationIssue(
+                    "$.preserved_pass_criteria",
+                    "preserved pass criteria missing from current matrix: " + ", ".join(missing_preserved),
+                )
+            ]
+        )
+    goal_text = _child_retune_goal_text(retune_path.read_text(encoding="utf-8"), run_id, selected_run_id)
+    assert_valid(lint_goal_text(goal_text, active_mode))
+    lock = build_goal_lock(brief, matrix, goal_text, executor, active_mode, selected_run_id)
+    lock.update(
+        {
+            "parent_run_id": run_id,
+            "retune_depth": retune_depth,
+            "preserved_pass_criteria": preserved_pass_ids,
+            "retune_targets": retune_target_ids,
+            "matrix_hash": lock["matrix_sha256"],
+        }
+    )
+    lock_issues = validate_matrix_lock(lock, brief, matrix, goal_text, active_mode)
+    lock_errors = [issue for issue in lock_issues if issue.severity == "error"]
+    if lock_errors:
+        raise ArtifactError(lock_errors)
+
+    adapter_input = base_artifact("rubricodex.adapter_input", mode=active_mode, run_id=selected_run_id)
+    adapter_input.update(
+        {
+            "executor": executor,
+            "brief_path": ".rubricodex/intent/brief.json",
+            "matrix_path": ".rubricodex/matrix/evaluation-matrix.json",
+            "goal_path": f".rubricodex/taskpacks/{selected_run_id}/goal.md",
+            "parent_run_id": run_id,
+        }
+    )
+    warning = None
+    if retune_depth > depth_warn:
+        warning = f"retune depth {retune_depth} exceeds warning threshold {depth_warn}"
+    result = {
+        "status": "pass",
+        "run_id": run_id,
+        "new_run_id": selected_run_id,
+        "retune_depth": retune_depth,
+        "preserved_pass_criteria": lock["preserved_pass_criteria"],
+        "retune_targets": lock["retune_targets"],
+        "dry_run": dry_run,
+        "warning": warning,
+        "paths": {
+            "goal": str(target_dir / "goal.md"),
+            "adapter_input": str(target_dir / "adapter-input.json"),
+            "lock": str(target_dir / "goal.lock.json"),
+        },
+    }
+    if dry_run:
+        return result
+
+    write_text(target_dir / "goal.md", goal_text)
+    write_json(target_dir / "adapter-input.json", adapter_input)
+    write_json(target_dir / "goal.lock.json", lock)
+    lint_goal_file(root_path, selected_run_id, mode=active_mode)
+    return result
 
 
 def _find_app_session_for_run(root: Path, run_id: str) -> tuple[dict[str, Any], Path]:
