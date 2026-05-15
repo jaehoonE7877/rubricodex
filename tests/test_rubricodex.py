@@ -973,6 +973,28 @@ class RubricodexContractTests(unittest.TestCase):
 
         self.assertIn("$.review", {issue.path for issue in context.exception.issues})
 
+    def test_plan_draft_review_confirmation_rejects_substring_goal_match(self) -> None:
+        with self.assertRaises(ArtifactError):
+            draft_harness(
+                self.root,
+                "reviewed",
+                "관리자 dashboard page를 만들고 test evidence를 남겨줘.",
+                mode="standard",
+                review=True,
+            )
+
+        with self.assertRaises(ArtifactError) as context:
+            draft_harness(
+                self.root,
+                "reviewed",
+                "dashboard page",
+                mode="standard",
+                review=True,
+                review_decision="yes",
+            )
+
+        self.assertIn("$.review", {issue.path for issue in context.exception.issues})
+
     def test_plan_draft_review_auto_accepts_micro_mode(self) -> None:
         result = draft_harness(
             self.root,
@@ -2544,6 +2566,20 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(lock["retune_depth"], 2)
         self.assertIn("retune depth 2", result["warning"])
 
+    def test_retune_apply_skips_existing_run_artifact_directory(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        run_dir(self.root, "example-v0.1-r2").mkdir(parents=True)
+
+        result = apply_retune(self.root, "example-v0.1")
+
+        self.assertEqual(result["new_run_id"], "example-v0.1-r3")
+        self.assertFalse(taskpack_dir(self.root, "example-v0.1-r2").exists())
+        self.assertTrue((taskpack_dir(self.root, "example-v0.1-r3") / "goal.md").is_file())
+
     def test_retune_apply_continues_two_digit_revision_ids(self) -> None:
         matrix = self.write_default_contract()
         compile_goal(self.root, "example-v0.1-r10")
@@ -2569,6 +2605,20 @@ class RubricodexContractTests(unittest.TestCase):
         self.assertEqual(result["new_run_id"], "fix-payment-retune")
         self.assertEqual(result["retune_depth"], 1)
         self.assertEqual(lock["retune_depth"], 1)
+
+    def test_retune_apply_rejects_custom_new_run_id_with_existing_run_artifacts(self) -> None:
+        matrix = self.write_default_contract()
+        compile_goal(self.root, "example-v0.1")
+        write_json(run_dir(self.root, "example-v0.1") / "evidence.json", sample_evidence(matrix, {"C-05": "partial"}))
+        compute_scorecard(self.root, "example-v0.1")
+        write_report(self.root, "example-v0.1")
+        run_dir(self.root, "fix-payment-retune").mkdir(parents=True)
+
+        with self.assertRaises(ArtifactError) as context:
+            apply_retune(self.root, "example-v0.1", new_run_id="fix-payment-retune")
+
+        self.assertIn("$.new_run_id", {issue.path for issue in context.exception.issues})
+        self.assertFalse(taskpack_dir(self.root, "fix-payment-retune").exists())
 
     def test_retune_apply_rejects_scorecard_targets_missing_from_matrix(self) -> None:
         matrix = self.write_default_contract()

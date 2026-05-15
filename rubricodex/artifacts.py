@@ -869,17 +869,26 @@ def _is_confirm_review_decision(review_decision: str | None) -> bool:
     return decision in {"y", "yes", "confirm", "confirmed"}
 
 
-def _review_draft_matches_request(brief: dict[str, Any], goal_text: str, mode: str) -> bool:
+def _normalize_request_text(text: Any) -> str:
+    return " ".join(str(text).strip().split())
+
+
+def _review_draft_matches_request(brief: dict[str, Any], matrix: dict[str, Any], goal_text: str, mode: str) -> bool:
     if brief.get("mode") != mode:
+        return False
+    if matrix.get("mode") != mode:
         return False
     blocks = brief.get("blocks")
     if not isinstance(blocks, dict):
         return False
-    goal_summary = " ".join(goal_text.strip().split())
-    purpose = blocks.get("purpose")
+    goal_summary = _normalize_request_text(goal_text)
+    expected_purpose = f"Complete the requested Rubricodex task: {goal_summary}"
+    purpose = _normalize_request_text(blocks.get("purpose", ""))
     scope_in = blocks.get("scope_in", [])
-    scope_text = " ".join(str(item) for item in scope_in) if isinstance(scope_in, list) else str(scope_in)
-    return goal_summary in str(purpose) or goal_summary in scope_text
+    scope_items = [_normalize_request_text(item) for item in scope_in] if isinstance(scope_in, list) else []
+    matrix_goal = _normalize_request_text(matrix.get("draft_goal", ""))
+    brief_matches = purpose == expected_purpose or goal_summary in scope_items
+    return brief_matches and matrix_goal == goal_summary
 
 
 def locked_taskpack_run_ids(root: Path | str) -> list[str]:
@@ -937,7 +946,7 @@ def draft_harness(
     if use_existing_review_draft:
         brief = read_json(intent_path(root_path))
         matrix = read_json(matrix_path(root_path))
-        if not _review_draft_matches_request(brief, goal_text, active_mode):
+        if not _review_draft_matches_request(brief, matrix, goal_text, active_mode):
             raise ArtifactError(
                 [ValidationIssue("$.review", "existing review draft does not match requested goal or mode")]
             )
@@ -2725,13 +2734,17 @@ def _parent_retune_depth(lock: dict[str, Any], run_id: str) -> int:
     return _split_retune_revision(run_id)[1]
 
 
+def _retune_run_id_exists(root: Path, run_id: str) -> bool:
+    return taskpack_dir(root, run_id).exists() or run_dir(root, run_id).exists()
+
+
 def _next_retune_run_id(root: Path, run_id: str, parent_depth: int | None = None) -> tuple[str, int]:
     base, suffix_depth = _split_retune_revision(run_id)
     next_revision = suffix_depth + 2
     base_depth = parent_depth if parent_depth is not None else suffix_depth
     while True:
         candidate = f"{base}-r{next_revision}"
-        if not taskpack_dir(root, candidate).exists():
+        if not _retune_run_id_exists(root, candidate):
             next_depth = base_depth + (next_revision - suffix_depth - 1)
             return candidate, next_depth
         next_revision += 1
@@ -2832,6 +2845,8 @@ def apply_retune(
     target_dir = taskpack_dir(root_path, selected_run_id)
     if target_dir.exists():
         raise ArtifactError([ValidationIssue("$.new_run_id", f"taskpack already exists: {selected_run_id}")])
+    if run_dir(root_path, selected_run_id).exists():
+        raise ArtifactError([ValidationIssue("$.new_run_id", f"run artifacts already exist: {selected_run_id}")])
 
     brief = read_json(intent_path(root_path))
     matrix = read_json(matrix_path(root_path))
